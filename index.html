@@ -1724,12 +1724,14 @@ function generateFactsheet(firma) {
 
   <div class="two-col">
     <div class="section">
-      <div class="section-title">Gesprächspartner</div>
+      <div class="section-title">Gesprächspartner${p.hauptkontakt ? ' <span style="font-size:10px;color:#C9A84C">★ Hauptkontakt</span>' : ''}</div>
       <table class="kv-table">
-        <tr><td>Name</td><td><strong>${p.ap||'–'}</strong></td></tr>
-        ${p.pos   ? `<tr><td>Funktion</td><td>${p.pos}</td></tr>` : ''}
-        ${p.tel   ? `<tr><td>Telefon</td><td>${p.tel}</td></tr>` : ''}
-        ${p.email ? `<tr><td>E-Mail</td><td>${p.email}</td></tr>` : ''}
+        <tr><td>Name</td><td><strong>${hauptkObj.name||p.ap||'–'}</strong></td></tr>
+        ${(hauptkObj.rolle||p.pos) ? `<tr><td>Funktion</td><td>${hauptkObj.rolle||p.pos}</td></tr>` : ''}
+        ${(hauptkObj.tel||p.tel)   ? `<tr><td>Telefon</td><td>${hauptkObj.tel||p.tel}</td></tr>` : ''}
+        ${(hauptkObj.email||p.email) ? `<tr><td>E-Mail</td><td>${hauptkObj.email||p.email}</td></tr>` : ''}
+        ${hauptkObj.linkedin ? `<tr><td>LinkedIn</td><td>${hauptkObj.linkedin}</td></tr>` : ''}
+        ${hauptkObj.notiz ? `<tr><td>Notiz</td><td style="font-style:italic;color:#666">${hauptkObj.notiz}</td></tr>` : ''}
       </table>
       ${wkRows ? `<div style="margin-top:8px;font-size:11px;color:#888;font-weight:600">Weitere Kontakte</div><table style="width:100%;margin-top:4px">${wkRows}</table>` : ''}
     </div>
