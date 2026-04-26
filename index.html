@@ -851,3 +851,664 @@ function renderDashboard() {
     </div>`;
   }).join('') : '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">✓ Keine offenen Aktivitäten</div>';
   >
+  document.getElementById('pipeline').innerHTML = pipelineStages.map(s => {
+    const count = ps.filter(p => p.status === s.name).length;
+    const pct = ps.length ? Math.round(count/ps.length*100) : 0;
+    return `<div style="margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:3px">
+        <span>${s.name}</span><span style="color:var(--text3)">${count}</span>
+      </div>
+      <div style="height:6px;background:var(--border);border-radius:3px">
+        <div style="height:6px;width:${pct}%;background:var(--accent-mid);border-radius:3px"></div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderAll() {
+  renderDashboard();
+  renderProspects();
+  renderAktivitaeten();
+}
+
+function today() { return new Date().toISOString().slice(0,10); }
+function fmtDate(s) { if(!s)return''; const[y,m,d]=s.split('-'); return `${d}.${m}.${y}`; }
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function toast(msg,dur=3000) { let t=document.getElementById('toast'); if(!t){t=document.createElement('div');t.id='toast';t.style.cssText='position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#0D1F3C;color:#fff;padding:10px 20px;border-radius:8px;font-size:13px;z-index:9999;opacity:0;transition:opacity .3s';document.body.appendChild(t);} t.textContent=msg;t.style.opacity='1';clearTimeout(t._timer);t._timer=setTimeout(()=>t.style.opacity='0',dur); }
+function updateSyncIndicator(state) { const el=document.getElementById('sync-indicator'); if(!el)return; if(state==='syncing'){el.textContent='↻ Synchronisiere…';el.style.color='rgba(255,255,255,.5)';}else if(state==='ok'){const now=new Date();el.textContent='✓ Sync '+now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');el.style.color='rgba(255,255,255,.5)';}else{el.textContent='✗ Sync Fehler';el.style.color='#f87171';} }
+
+let DB;
+const saved = localStorage.getItem(STORAGE_KEY);
+if (saved) { try { DB=JSON.parse(saved); if(!DB.prospects)DB.prospects=JSON.parse(JSON.stringify(INIT_PROSPECTS)); if(!DB.aktivitaeten)DB.aktivitaeten=JSON.parse(JSON.stringify(INIT_AKTIVITAETEN)); } catch(e) { DB={prospects:JSON.parse(JSON.stringify(INIT_PROSPECTS)),aktivitaeten:JSON.parse(JSON.stringify(INIT_AKTIVITAETEN))}; } } else { DB={prospects:JSON.parse(JSON.stringify(INIT_PROSPECTS)),aktivitaeten:JSON.parse(JSON.stringify(INIT_AKTIVITAETEN))}; }
+
+function saveData() { localStorage.setItem(STORAGE_KEY,JSON.stringify(DB)); if(window._syncTimer)clearTimeout(window._syncTimer); window._syncTimer=setTimeout(syncPush,800); }
+
+
+// ── SYNC ENGINE ──
+function ensureTimestamps() {
+  DB.prospects.forEach(p => { if (!p._ts) p._ts = 0; });
+}
+
+async function syncPush() {
+  try {
+    const pRows = DB.prospects.map(p => ({
+      id: p.id,
+      data: p,
+      updated_at: p._ts ? new Date(p._ts).toISOString() : new Date().toISOString()
+    }));
+    const r1 = await fetch(SB_URL + '/rest/v1/prospects', {
+      method: 'POST',
+      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+      body: JSON.stringify(pRows)
+    });
+    if (!r1.ok) console.error('Push prospects:', r1.status, await r1.text().then(t=>t.slice(0,100)));
+    if (DB.aktivitaeten.length > 0) {
+      DB.aktivitaeten.forEach((a, i) => { if (!a._id) a._id = (a.firma||'x').slice(0,10)+'_'+(a.datum||'')+'_'+i; });
+      const aRows = DB.aktivitaeten.map(a => ({ id: a._id, data: a }));
+      await fetch(SB_URL + '/rest/v1/aktivitaeten', {
+        method: 'POST',
+        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(aRows)
+      });
+    }
+    localStorage.setItem('fkc_last_sync', new Date().toISOString());
+    updateSyncIndicator('ok');
+  } catch(e) { console.error('syncPush error:', e); updateSyncIndicator('error'); }
+}
+
+async function syncPull() {
+  try {
+    const [pResp, aResp] = await Promise.all([
+      fetch(SB_URL + '/rest/v1/prospects?select=id,data,updated_at&order=id.asc&limit=500', { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }),
+      fetch(SB_URL + '/rest/v1/aktivitaeten?select=id,data&order=updated_at.desc&limit=1000', { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } })
+    ]);
+    if (pResp.ok) {
+      const pData = await pResp.json();
+      if (pData && pData.length > 0) {
+        const merged = [];
+        const cloudById = {};
+        pData.forEach(row => { cloudById[row.id] = { data: row.data, cloudTs: new Date(row.updated_at).getTime() }; });
+        Object.keys(cloudById).forEach(id => {
+          const cloud = cloudById[id];
+          const local = DB.prospects.find(p => p.id === id);
+          if (local && local._ts && local._ts > cloud.cloudTs) { merged.push(local); }
+          else { merged.push(cloud.data); }
+        });
+        DB.prospects.filter(p => !cloudById[p.id]).forEach(p => merged.push(p));
+        DB.prospects = merged.sort((a,b) => { const na=parseInt((a.id||'').replace('ERA-',''))||0, nb=parseInt((b.id||'').replace('ERA-',''))||0; return na-nb; });
+      }
+    }
+    if (aResp.ok) {
+      const aData = await aResp.json();
+      const cloudAkts = aData.length > 0 ? aData.map(r => r.data) : [];
+      const cloudIds = new Set(cloudAkts.map(a => a._id).filter(Boolean));
+      const lokalNeu = DB.aktivitaeten.filter(a => a._id && !cloudIds.has(a._id));
+      const alle = [...cloudAkts, ...lokalNeu];
+      const seen = new Set();
+      DB.aktivitaeten = alle.filter(a => {
+        const k = a._id || ((a.firma||'')+'|'+(a.datum||'')+'|'+(a.ergebnis||'').slice(0,20));
+        if (seen.has(k)) return false; seen.add(k); return true;
+      }).sort((a,b) => (b.datum||'').localeCompare(a.datum||''));
+    }
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(DB));
+    renderAll();
+    localStorage.setItem('fkc_last_sync', new Date().toISOString());
+    updateSyncIndicator('ok');
+  } catch(e) { console.error('syncPull error:', e); updateSyncIndicator('error'); }
+}
+
+async function syncBoth() {
+  if (syncInProgress) return;
+  syncInProgress = true;
+  updateSyncIndicator('syncing');
+  try { await syncPush(); await syncPull(); } finally { syncInProgress = false; }
+}
+
+// ── PROSPECTS RENDER ──
+function renderProspects() {
+  const q = (document.getElementById('p-search')?.value||'').toLowerCase();
+  const fs = document.getElementById('p-filter-status')?.value||'';
+  const fw = document.getElementById('p-filter-wice')?.value||'';
+  const fp = document.getElementById('p-filter-prio')?.value||'';
+  const so = document.getElementById('p-sort')?.value||'prio-desc';
+  let rows = DB.prospects.filter(p => {
+    if (fs && p.status !== fs) return false;
+    if (fw === 'wice' && p.quelle !== 'Wice') return false;
+    if (fw === 'eigen' && p.quelle === 'Wice') return false;
+    if (fp && String(p.prio) !== fp) return false;
+    if (q) { const s = (p.id+' '+p.firma+' '+p.ap+' '+p.branche).toLowerCase(); if (!s.includes(q)) return false; }
+    return true;
+  });
+  rows = rows.sort((a,b) => {
+    if (so === 'prio-desc') return (b.prio||0)-(a.prio||0);
+    if (so === 'prio-asc') return (a.prio||0)-(b.prio||0);
+    if (so === 'firma-asc') return (a.firma||'').localeCompare(b.firma||'');
+    if (so === 'followup-asc') return (a.followup||'9999').localeCompare(b.followup||'9999');
+    if (so === 'status') return (a.status||'').localeCompare(b.status||'');
+    return 0;
+  });
+  const countEl = document.getElementById('p-count');
+  if (countEl) countEl.innerHTML = `${rows.length}<br>von<br>${DB.prospects.length}`;
+  const tbody = document.getElementById('prospects-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = rows.map(p => {
+    const wk = (p.weitereKontakte||[]).filter(k=>k.name&&k.name!=='None').slice(0,2).map(k=>`<div class="cell-sub">+ ${esc(k.name)}</div>`).join('');
+    const isWice = p.quelle === 'Wice';
+    const wiceBtn = isWice
+      ? `<button class="btn-wice claimed" onclick="event.stopPropagation()" title="Wice-Geclaimt"><svg width="10" height="10" viewBox="0 0 12 12" fill="currentColor"><path d="M5 9L1.5 5.5l1-1L5 7l4.5-4.5 1 1z"/></svg>Wice</button>`
+      : `<button class="btn-wice" onclick="event.stopPropagation();setWice('${esc(p.firma)}')" title="In Wice claimen">+ claimen</button>`;
+    return `<tr onclick="openDetail('${esc(p.firma)}')" style="cursor:pointer">
+      <td><span class="prospect-id">${p.id}</span></td>
+      <td><div class="cell-firma">${esc(p.firma)}</div><div class="cell-sub">${esc(p.branche||'')}</div></td>
+      <td>
+        <div>${esc(p.ap||'')}</div>
+        ${p.pos?`<div class="cell-sub">${esc(p.pos)}</div>`:''}
+        ${wk}
+        <button onclick="event.stopPropagation();openKontaktModal('${esc(p.firma)}')" style="margin-top:4px;background:none;border:1px dashed var(--border);border-radius:4px;padding:2px 8px;font-size:10px;color:var(--text3);cursor:pointer">+ Kontakt</button>
+      </td>
+      <td>${statusPill(p.status)}</td>
+      <td>${prio(p.prio)}</td>
+      <td>${wiceBtn}</td>
+      <td style="font-size:12px;color:var(--text3)">${p.followup?fmtDate(p.followup):''}</td>
+      <td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((p.argument||'').slice(0,80))}${(p.argument||'').length>80?'…':''}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── DETAIL VIEW ──
+function openDetail(firma) {
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  switchView('detail');
+  const pAkts = DB.aktivitaeten.filter(a=>a.firma===p.firma||a.eraId===p.id).sort((a,b)=>(b.datum||'').localeCompare(a.datum||''));
+  const sortedWK = [...(p.weitereKontakte||[]).filter(k=>k.name&&k.name!=='None')].sort((a,b)=>{if(a.name===p.hauptkontakt)return -1;if(b.name===p.hauptkontakt)return 1;return 0;});
+  const wkCards = sortedWK.map((k) => {
+    const origIdx = (p.weitereKontakte||[]).findIndex(x=>x.name===k.name);
+    const isHaupt = k.name === p.hauptkontakt;
+    return `<div class="kontakt-card" style="${isHaupt?'border:2px solid var(--accent-mid)':''}">
+      <div class="kontakt-card-info">
+        <div class="kontakt-card-name">${isHaupt?'<span style="color:#C9A84C;font-size:11px;margin-right:4px">&#9733;</span>':''}${esc(k.name)}${isHaupt?'<span style="font-size:10px;color:#C9A84C;margin-left:4px">Hauptkontakt</span>':''}</div>
+        ${k.rolle?`<div class="kontakt-card-rolle">${esc(k.rolle)}</div>`:''}
+        <div class="kontakt-card-detail">
+          ${k.tel?`<a href="tel:${esc(k.tel)}" style="display:block;color:var(--accent-mid);font-size:12px">&#128222; ${esc(k.tel)}</a>`:''}
+          ${k.email?`<a href="mailto:${esc(k.email)}" style="display:block;color:var(--accent-mid);font-size:12px">&#9993; ${esc(k.email)}</a>`:''}
+          ${k.notiz?`<div style="color:var(--text3);font-size:11px;margin-top:3px">${esc(k.notiz)}</div>`:''}
+        </div>
+      </div>
+      <div class="kontakt-card-actions">
+        ${!isHaupt?`<button onclick="setHauptkontakt('${esc(p.firma)}','${esc(k.name)}')" style="background:none;border:1px solid #C9A84C;border-radius:4px;padding:3px 6px;font-size:10px;color:#C9A84C;cursor:pointer">&#9733;</button>`:''}
+        <button class="btn-kontakt-edit" onclick="openKontaktModal('${esc(p.firma)}',${origIdx})">&#9998;</button>
+        <button class="btn-kontakt-del" onclick="deleteKontakt('${esc(p.firma)}',${origIdx})">&#10005;</button>
+      </div>
+    </div>`;
+  }).join('');
+  const ktItems = (p.kostentreiber||'').split(/,(?![^(]*\))/).map(k=>k.trim()).filter(Boolean).map(k=>{
+    const m=k.match(/^(.+?)\s*\((★+)\)\s*$/);
+    return m?`<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--border);font-size:12px"><span>${esc(m[1].trim())}</span><span style="color:#C9A84C">${m[2]}</span></div>`:`<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px">${esc(k)}</div>`;
+  }).join('');
+  const isWice = p.quelle === 'Wice';
+  document.getElementById('detail-content').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:16px">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px;flex-wrap:wrap;gap:8px">
+          <div>
+            <h2 style="font-size:20px;font-weight:700;color:var(--text)">${esc(p.firma)}</h2>
+            <div style="font-size:12px;color:var(--text3);margin-top:2px">${p.id} · ${statusPill(p.status)} · ${prio(p.prio)}</div>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-secondary btn-sm" onclick="openModalForFirma('${esc(p.firma)}')">+ Aktivität</button>
+            ${isWice?`<button class="btn btn-sm" style="background:#0d1f3c;color:#7eb8f7;border:1px solid #1a3a6e;font-size:12px" disabled>🔒 Wice-Geclaimt</button>`:`<button class="btn btn-secondary btn-sm" onclick="setWice('${esc(p.firma)}')">+ In Wice claimen</button>`}
+            <button class="btn btn-primary btn-sm" onclick="generateFactsheet('${esc(p.firma)}')">📄 Factsheet</button>
+            <button class="btn btn-sm" style="background:rgba(255,100,0,.1);color:#e05a00;border:1px solid rgba(255,100,0,.3);font-size:12px" onclick="setKeinInteresse('${esc(p.firma)}')">👎 Kein Interesse</button>
+            <button class="btn btn-sm" style="background:rgba(220,0,0,.08);color:#cc2200;border:1px solid rgba(220,0,0,.2);font-size:12px" onclick="prospectLoeschen('${esc(p.firma)}')">🗑 Löschen</button>
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header"><div class="card-title">Aktivitäten-Historie</div><span style="font-size:12px;color:var(--text3)">${pAkts.length} gesamt · ${pAkts.filter(a=>(a.status||'offen')==='offen').length} offen</span></div>
+          <div style="padding:0">
+            ${pAkts.length ? pAkts.map((a,i) => `<div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start">
+                <div style="font-size:12px;color:var(--text3)">${a.datum||''} ${a.followup&&a.followup!==a.datum?`→ <strong style="color:var(--accent-mid)">${a.followup}</strong>`:''}</div>
+                ${a.status==='erledigt'?'<span style="font-size:10px;color:#2d7a4e;background:#e8f8f0;padding:2px 6px;border-radius:8px">✓ erledigt</span>':`<button onclick="abschliessen(${DB.aktivitaeten.indexOf(a)})" style="font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;color:var(--text3)">✓ Abschließen</button>`}
+              </div>
+              <div style="font-size:13px;margin-top:4px">${esc(a.kanal||'')} · ${esc(a.typ||'')}</div>
+              <div style="font-size:13px;color:var(--text2);margin-top:2px">${esc(a.ergebnis||'')}</div>
+              ${a.schritt?`<div style="font-size:12px;color:var(--accent-mid);margin-top:4px">→ ${esc(a.schritt)}</div>`:''}
+            </div>`).join('') : '<div style="padding:24px;text-align:center;color:var(--text3)">Noch keine Aktivitäten</div>'}
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Relevante Ereignisse</div></div>
+          <div style="padding:14px 16px;font-size:13px;color:var(--text2);line-height:1.6">${esc(p.ereignisse||'–')}</div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header"><div class="card-title">Stammdaten</div></div>
+          <div style="padding:12px 16px">
+            ${[['ERA-ID',p.id],['Rechtsform',p.rechtsform],['Gegründet',p.gruendung],['Branche',p.branche],['Sitz / Adresse',p.adresse],['Website',p.website?`<a href="https://${p.website.replace('https://','').replace('http://','')||''}" target="_blank" style="color:var(--accent-mid)">${p.website}</a>`:null],['Telefon',p.tel?`<a href="tel:${p.tel}" class="btn btn-secondary btn-sm" style="font-size:12px">📞 ${p.tel}</a>`:null],['E-Mail',p.email?`<a href="mailto:${p.email}" style="color:var(--accent-mid);font-size:12px">${p.email}</a>`:null],['Umsatz (Mio €)',p.umsatz],['Mitarbeiter',p.ma],['Kontaktkanal',p.kanal||p.quelle],['Quelle',p.quelle]].filter(([,v])=>v).map(([k,v])=>`<div style="display:flex;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div style="width:110px;color:var(--text3);flex-shrink:0">${k}</div><div>${typeof v==='string'?esc(v):v}</div></div>`).join('')}
+          </div>
+        </div>
+        <div class="card" style="margin-bottom:12px">
+          <div class="card-header"><div class="card-title">Größte Kostentreiber</div></div>
+          <div style="padding:12px 16px">${ktItems||'<div style="font-size:12px;color:var(--text3)">–</div>'}</div>
+        </div>
+        <div class="card">
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center">
+            <div class="card-title">Kontakte</div>
+            <button class="btn btn-secondary btn-sm" onclick="openKontaktModal('${esc(p.firma)}')">+ Kontakt</button>
+          </div>
+          <div style="padding:12px 16px">
+            ${mkContactCard(p.ap, p.pos, p.tel, p.email, true)}
+            ${wkCards}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// ── AKTIVITAETEN RENDER ──
+function renderAktivitaeten() {
+  const fs = document.getElementById('a-filter-status')?.value||'offen';
+  const fd = document.getElementById('a-filter-date')?.value||'';
+  let rows = DB.aktivitaeten.filter(a => {
+    if (fs) { const s=(a.status||'offen').toLowerCase(); if(fs==='offen'&&s!=='offen'&&s!=='open'&&s!=='')return false; if(fs==='erledigt'&&s!=='erledigt')return false; }
+    if (fd && a.datum !== fd) return false;
+    return true;
+  }).sort((a,b) => {
+    if (fs==='offen'||fs==='') { const af=a.followup||'9999-99-99', bf=b.followup||'9999-99-99'; return af.localeCompare(bf); }
+    return (b.datum||'').localeCompare(a.datum||'');
+  });
+  const tbody = document.getElementById('akt-tbody');
+  if (!tbody) return;
+  tbody.innerHTML = rows.map(a => {
+    const idx = DB.aktivitaeten.indexOf(a);
+    const isDone = (a.status||'').toLowerCase() === 'erledigt';
+    return `<tr style="opacity:${isDone?0.6:1}">
+      <td style="font-size:12px">${a.datum||''}</td>
+      <td style="font-weight:500;cursor:pointer;color:var(--accent-mid)" onclick="openDetail('${esc(a.firma)}')">${esc(a.firma)}</td>
+      <td style="font-size:12px">${esc(a.ap||'')}</td>
+      <td style="font-size:12px">${esc(a.kanal||'')} · ${esc(a.typ||'')}</td>
+      <td style="font-size:12px;color:var(--text2)">${esc(a.ergebnis||'')}</td>
+      <td style="font-size:12px;color:var(--accent-mid)">${esc(a.schritt||'')}</td>
+      <td style="font-size:12px;font-weight:${a.followup?600:400};color:${a.followup<today()&&!isDone?'#c0392b':a.followup===today()?'#856404':'var(--text)'}">${a.followup?fmtDate(a.followup):''}</td>
+      <td>${isDone?'<span style="font-size:11px;color:#2d7a4e">✓ erledigt</span>':`<button onclick="abschliessen(${idx})" style="font-size:11px;background:none;border:1px solid var(--border);border-radius:4px;padding:3px 8px;cursor:pointer">✓</button>`}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── AKTIVITAET SPEICHERN ──
+function saveAktivitaet() {
+  const firma = document.getElementById('a-firma').value.trim();
+  if (!firma) { alert('Bitte Firma eingeben.'); return; }
+  const p = DB.prospects.find(x => x.firma === firma);
+  const akt = {
+    datum: document.getElementById('a-datum').value || today(),
+    firma, eraId: p?.id||'',
+    ap: document.getElementById('a-ap').value.trim(),
+    kanal: document.getElementById('a-kanal')?.value||'',
+    typ: document.getElementById('a-typ')?.value||'',
+    ergebnis: document.getElementById('a-ergebnis').value.trim(),
+    schritt: document.getElementById('a-schritt').value.trim(),
+    followup: document.getElementById('a-followup').value,
+    bearbeiter: 'Fabian Krone', status: 'offen'
+  };
+  if (!akt._id) akt._id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  const newStatus = document.getElementById('a-status-change')?.value;
+  if (newStatus && p) { p.status = newStatus; p._ts = Date.now(); }
+  DB.aktivitaeten.unshift(akt);
+  saveData();
+  closeModal('akt-modal');
+  toast('✓ Aktivität gespeichert');
+  renderAll();
+}
+
+function abschliessen(idx) {
+  if (idx < 0 || idx >= DB.aktivitaeten.length) return;
+  const akt = DB.aktivitaeten[idx];
+  akt.status = 'erledigt';
+  saveData();
+  const folgeId = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  document.getElementById('folge-info').textContent = '✓ ' + akt.firma + (akt.schritt?' — '+akt.schritt.slice(0,70):'');
+  document.getElementById('f-firma').value = akt.firma;
+  document.getElementById('f-ap').value = akt.ap||'';
+  document.getElementById('f-datum').value = today();
+  openModal('folge-modal');
+  renderAll();
+}
+
+function saveFolge() {
+  const firma = document.getElementById('f-firma').value;
+  const folge = {
+    _id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+    datum: document.getElementById('f-datum').value || today(),
+    firma,
+    eraId: DB.prospects.find(x=>x.firma===firma)?.id||'',
+    ap: document.getElementById('f-ap').value,
+    kanal: document.getElementById('f-kanal')?.value||'',
+    typ: document.getElementById('f-typ')?.value||'',
+    ergebnis: '',
+    schritt: document.getElementById('f-schritt').value,
+    followup: document.getElementById('f-followup').value,
+    bearbeiter: 'Fabian Krone',
+    status: 'offen'
+  };
+  DB.aktivitaeten.unshift(folge);
+  saveData();
+  closeModal('folge-modal');
+  toast('✓ Folge-Aktivität angelegt');
+  renderAll();
+}
+
+// ── PROSPECT ACTIONS ──
+function setWice(firma) {
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  if (p.quelle === 'Wice') { toast('Bereits als Wice-Geclaimt markiert'); return; }
+  p.quelle = 'Wice';
+  p._ts = Date.now();
+  saveData();
+  toast('🔒 ' + p.firma + ' als Wice-Geclaimt markiert');
+  renderProspects();
+  openDetail(firma);
+}
+
+function setHauptkontakt(firma, name) {
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  p.hauptkontakt = name;
+  p._ts = Date.now();
+  saveData();
+  toast('★ ' + name + ' ist jetzt Hauptkontakt');
+  openDetail(firma);
+}
+
+function setKeinInteresse(firma) {
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  p.status = 'Kein Interesse';
+  p.prio = 1;
+  p._ts = Date.now();
+  saveData();
+  toast('👎 ' + p.firma + ' → Kein Interesse');
+  renderProspects();
+}
+
+function prospectLoeschen(firma) {
+  if (!confirm('Prospect "' + firma + '" wirklich löschen?')) return;
+  const idx = DB.prospects.findIndex(x => x.firma === firma);
+  if (idx < 0) return;
+  const id = DB.prospects[idx].id;
+  DB.prospects.splice(idx, 1);
+  saveData();
+  fetch(SB_URL + '/rest/v1/prospects?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }).catch(e=>console.error(e));
+  toast('🗑 ' + firma + ' gelöscht');
+  switchView('prospects');
+  renderProspects();
+}
+
+function saveProspect() {
+  const firma = document.getElementById('np-firma').value.trim();
+  if (!firma) { alert('Firma ist erforderlich'); return; }
+  const maxId = Math.max(...DB.prospects.map(p=>parseInt((p.id||'ERA-0').replace('ERA-',''))||0));
+  const p = {
+    id: 'ERA-' + String(maxId+1).padStart(3,'0'),
+    firma,
+    ap: document.getElementById('np-ap').value.trim(),
+    pos: document.getElementById('np-pos').value.trim(),
+    tel: document.getElementById('np-tel').value.trim(),
+    email: document.getElementById('np-email').value.trim(),
+    status: document.getElementById('np-status').value,
+    prio: parseInt(document.getElementById('np-prio').value)||3,
+    branche: document.getElementById('np-branche').value.trim(),
+    quelle: document.getElementById('np-quelle').value,
+    argument: document.getElementById('np-argument').value.trim(),
+    weitereKontakte: [],
+    _ts: Date.now()
+  };
+  DB.prospects.push(p);
+  saveData();
+  closeModal('prospect-modal');
+  toast('✓ ' + firma + ' hinzugefügt');
+  renderProspects();
+}
+
+// ── KONTAKT MANAGEMENT ──
+function openKontaktModal(firma, idx) {
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  document.getElementById('k-firma').value = firma;
+  document.getElementById('k-index').value = idx !== undefined ? idx : -1;
+  if (idx !== undefined && idx >= 0) {
+    const k = (p.weitereKontakte||[])[idx] || {};
+    document.getElementById('kontakt-modal-title').textContent = 'Gesprächspartner bearbeiten';
+    document.getElementById('k-name').value = k.name||'';
+    document.getElementById('k-rolle').value = k.rolle||'';
+    document.getElementById('k-tel').value = k.tel||'';
+    document.getElementById('k-email').value = k.email||'';
+    document.getElementById('k-linkedin').value = k.linkedin||'';
+    document.getElementById('k-notiz').value = k.notiz||'';
+  } else {
+    document.getElementById('kontakt-modal-title').textContent = 'Gesprächspartner hinzufügen';
+    ['k-name','k-rolle','k-tel','k-email','k-linkedin','k-notiz'].forEach(id=>document.getElementById(id).value='');
+  }
+  openModal('kontakt-modal');
+  setTimeout(()=>document.getElementById('k-name').focus(),100);
+}
+
+function saveKontakt() {
+  const firma = document.getElementById('k-firma').value;
+  const idx = parseInt(document.getElementById('k-index').value);
+  const name = document.getElementById('k-name').value.trim();
+  if (!name) { alert('Name ist erforderlich'); return; }
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  if (!p.weitereKontakte) p.weitereKontakte = [];
+  const kontakt = { name, rolle: document.getElementById('k-rolle').value.trim(), tel: document.getElementById('k-tel').value.trim(), email: document.getElementById('k-email').value.trim(), linkedin: document.getElementById('k-linkedin').value.trim(), notiz: document.getElementById('k-notiz').value.trim() };
+  Object.keys(kontakt).forEach(k => { if (!kontakt[k]) delete kontakt[k]; });
+  if (idx >= 0) { p.weitereKontakte[idx] = kontakt; } else { p.weitereKontakte.push(kontakt); }
+  p._ts = Date.now();
+  saveData();
+  closeModal('kontakt-modal');
+  toast('✓ Kontakt gespeichert');
+  if (document.getElementById('view-detail').classList.contains('active')) openDetail(firma);
+}
+
+function deleteKontakt(firma, idx) {
+  if (!confirm('Kontakt löschen?')) return;
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p || !p.weitereKontakte) return;
+  p.weitereKontakte.splice(idx, 1);
+  p._ts = Date.now();
+  saveData();
+  toast('Kontakt gelöscht');
+  openDetail(firma);
+}
+
+// ── EXCEL IMPORT ──
+function importExcel(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = ev => {
+    try {
+      const wb = XLSX.read(ev.target.result, {type:'binary'});
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws);
+      let added = 0;
+      data.forEach(row => {
+        const firma = row['Unternehmen'] || row['Firma'] || row['Company'] || '';
+        if (!firma) return;
+        if (DB.prospects.find(p=>p.firma===firma)) return;
+        const maxId = Math.max(...DB.prospects.map(p=>parseInt((p.id||'ERA-0').replace('ERA-',''))||0));
+        DB.prospects.push({ id:'ERA-'+String(maxId+1).padStart(3,'0'), firma, ap:row['Ansprechpartner']||row['AP']||'', pos:row['Position']||'', status:'Recherche', prio:3, quelle:'Import', _ts:Date.now() });
+        added++;
+      });
+      saveData();
+      renderProspects();
+      toast('✓ ' + added + ' Prospects importiert');
+    } catch(err) { toast('Fehler beim Import: ' + err.message); }
+  };
+  reader.readAsBinaryString(file);
+}
+
+function exportBackup() {
+  const data = JSON.stringify(DB, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href=url; a.download='ERA_CRM_Backup_'+today()+'.json';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('✓ Backup exportiert');
+}
+
+// ── PRINT / FACTSHEET ──
+function generateFactsheet(firma) {
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  const hauptkName = p.hauptkontakt || p.ap;
+  const hauptkObj = (p.weitereKontakte||[]).find(k => k.name === hauptkName) || { name: p.ap, rolle: p.pos, tel: p.tel, email: p.email };
+  if (!hauptkObj.tel && p.tel) hauptkObj.tel = p.tel;
+  if (!hauptkObj.email && p.email) hauptkObj.email = p.email;
+  window._lastFactsheetFirma = p.firma;
+  const today_str = new Date().toLocaleDateString('de-DE', {day:'2-digit',month:'2-digit',year:'numeric'});
+  const ktRows = (p.kostentreiber||'').split(/,(?![^(]*\))/).map(k=>k.trim()).filter(Boolean).map((k,i) => {
+    const m = k.match(/^(.+?)\s*\((★+)\)\s*$/);
+    const label = m ? m[1].trim() : k.replace(/★+/g,'').trim();
+    const stars = m ? m[2] : '★★★';
+    return `<tr style="background:${i%2===0?'#fff':'#f9f9f9'};border-bottom:1px solid #eee"><td style="padding:6px 10px;font-size:12px;font-weight:500">${label}</td><td style="padding:6px 10px;font-size:11px;color:#666">ERA-Benchmarkpotenzial vorhanden</td><td style="padding:6px 10px;text-align:right;color:#C9A84C;font-size:13px">${stars}</td></tr>`;
+  }).join('');
+  const dosItems = (p.ersttermin_dos||'Konkrete Zahlen nennen · Nullrisiko betonen').split('·').map(d=>d.trim()).filter(Boolean);
+  const dontsItems = (p.ersttermin_donts||'Keine abstrakten Versprechen · Kein Druck').split('·').map(d=>d.trim()).filter(Boolean);
+  const fsHtml = `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Fact Sheet – ${p.firma}</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:13px;color:#222;background:#fff}.page{max-width:800px;margin:0 auto;padding:28px 36px}.era-header{background:#0D1F3C;color:white;padding:14px 20px;display:flex;justify-content:space-between;align-items:center}.company-title{background:#f5f7fa;border-left:5px solid #C9A84C;padding:14px 20px;margin:16px 0 6px}.company-title h1{font-size:18px;font-weight:700;color:#0D1F3C}.gold-bar{height:2px;background:linear-gradient(to right,#C9A84C,#e8c97a,#C9A84C);margin-bottom:18px}.section{margin-bottom:18px}.section-title{font-size:11px;font-weight:700;color:#0D1F3C;letter-spacing:1.5px;text-transform:uppercase;border-bottom:2px solid #C9A84C;padding-bottom:4px;margin-bottom:10px;display:flex;align-items:center;gap:6px}.section-num{background:#0D1F3C;color:#C9A84C;font-size:10px;padding:1px 6px;border-radius:3px}table{width:100%;border-collapse:collapse}.kv-table td{padding:4px 8px;vertical-align:top;border-bottom:1px solid #f5f5f5}.kv-table td:first-child{color:#888;width:160px;font-size:12px}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:18px}.arg-box{background:#EEF2FF;border-left:4px solid #0D1F3C;padding:12px 16px;border-radius:0 4px 4px 0;font-size:13px;line-height:1.6}.pitch-box{background:#0D1F3C;color:white;padding:14px 18px;border-radius:4px;font-size:13px;line-height:1.7;margin-bottom:18px}.dos-donts{display:grid;grid-template-columns:1fr 1fr;gap:12px}.dos{background:#f0faf4;border:1px solid #b8e6cc;border-radius:4px;padding:12px 14px}.donts{background:#fff4f4;border:1px solid #f5c6c6;border-radius:4px;padding:12px 14px}.dos-title{font-size:11px;font-weight:700;color:#2d7a4e;margin-bottom:8px}.donts-title{font-size:11px;font-weight:700;color:#c0392b;margin-bottom:8px}.check-list{list-style:none}.check-list li{padding:3px 0;font-size:12px;line-height:1.4}.check-list li:before{content:"✓ ";color:#2d7a4e;font-weight:700}.donts .check-list li:before{content:"✗ ";color:#c0392b;font-weight:700}.kontakt-box{background:#f8f9fc;border:1px solid #dde3ee;border-radius:4px;padding:12px 14px}.metrics-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:18px}.metric-card{background:#f5f7fa;border:1px solid #e8eaf0;border-radius:4px;padding:10px 12px;text-align:center}.metric-val{font-size:18px;font-weight:700;color:#0D1F3C}.metric-label{font-size:10px;color:#888;margin-top:2px}.footer{margin-top:24px;padding-top:10px;border-top:2px solid #0D1F3C;font-size:10px;color:#888;display:flex;justify-content:space-between}@media print{body{font-size:11px}.page{padding:16px 20px}}</style></head><body><div class="page">
+  <div class="era-header"><div style="font-size:11px;color:rgba(255,255,255,.7)">ERA Group | Prospect Fact Sheet</div><div style="font-size:11px;color:rgba(255,255,255,.7);text-align:right">Erstellt von: Fabian Krone | ERA Group | Radeberger Str. 25, 01099 Dresden<br>Stand: ${today_str} | Vertraulich</div></div>
+  <div class="company-title"><h1>${p.firma}</h1><div style="font-size:12px;color:#666;margin-top:3px">${p.branche||''} ${p.adresse?'| '+p.adresse:''}</div></div>
+  <div class="gold-bar"></div>
+  <div class="metrics-grid">
+    ${p.ma?`<div class="metric-card"><div class="metric-val">${p.ma}</div><div class="metric-label">Mitarbeiter</div></div>`:''}
+    ${p.umsatz?`<div class="metric-card"><div class="metric-val">${p.umsatz} Mio €</div><div class="metric-label">Umsatz</div></div>`:''}
+    ${p.gruendung?`<div class="metric-card"><div class="metric-val">${p.gruendung}</div><div class="metric-label">Gegründet</div></div>`:''}
+    ${p.status?`<div class="metric-card"><div class="metric-val" style="font-size:13px">${p.status}</div><div class="metric-label">CRM-Status</div></div>`:''}
+  </div>
+  <div class="two-col">
+    <div class="section"><div class="section-title"><span class="section-num">1</span> Stammdaten</div><table class="kv-table">
+      <tr><td>Firmierung</td><td>${p.firma}</td></tr>
+      ${p.rechtsform?`<tr><td>Rechtsform</td><td>${p.rechtsform}</td></tr>`:''}
+      ${p.gruendung?`<tr><td>Gegründet</td><td>${p.gruendung}</td></tr>`:''}
+      ${p.adresse?`<tr><td>Sitz</td><td>${p.adresse}</td></tr>`:''}
+      ${p.website?`<tr><td>Website</td><td>${p.website}</td></tr>`:''}
+      ${p.tel?`<tr><td>Telefon</td><td>${p.tel}</td></tr>`:''}
+    </table></div>
+    <div class="section"><div class="section-title"><span class="section-num">2</span> Kennzahlen</div><table class="kv-table">
+      ${p.ma?`<tr><td>Mitarbeiter</td><td><strong>${p.ma}</strong></td></tr>`:''}
+      ${p.umsatz?`<tr><td>Umsatz</td><td><strong>${p.umsatz} Mio €</strong></td></tr>`:''}
+      ${p.branche?`<tr><td>Branche</td><td>${p.branche}</td></tr>`:''}
+      ${p.ereignisse?`<tr><td colspan="2" style="padding-top:8px;font-size:11px;color:#555;line-height:1.5;border-top:1px solid #eee">${p.ereignisse.slice(0,300)}${p.ereignisse.length>300?'…':''}</td></tr>`:''}
+    </table></div>
+  </div>
+  <div class="section"><div class="section-title"><span class="section-num">3</span> Größte Kostentreiber & ERA-Relevanz</div>
+    <table style="width:100%;border-collapse:collapse"><thead><tr style="background:#0D1F3C;color:white"><th style="padding:7px 10px;text-align:left;font-size:11px">Kostenblock</th><th style="padding:7px 10px;text-align:left;font-size:11px;width:200px">Begründung</th><th style="padding:7px 10px;text-align:right;font-size:11px;width:100px">Priorität</th></tr></thead><tbody>${ktRows}</tbody></table>
+  </div>
+  <div class="section"><div class="section-title"><span class="section-num">4</span> Gesprächspartner${p.hauptkontakt?' <span style="font-size:10px;color:#C9A84C">★ Hauptkontakt</span>':''}</div>
+    <div class="kontakt-box" style="margin-bottom:10px">
+      <div style="font-size:15px;font-weight:700;color:#0D1F3C;margin-bottom:4px">${hauptkObj.name||p.ap||'–'}</div>
+      ${hauptkObj.rolle||p.pos?`<div style="font-size:12px;color:#666;margin-bottom:6px">${hauptkObj.rolle||p.pos}</div>`:''}
+      ${hauptkObj.tel||p.tel?`<div style="font-size:12px;margin-bottom:2px">📞 ${hauptkObj.tel||p.tel}</div>`:''}
+      ${hauptkObj.email||p.email?`<div style="font-size:12px;color:#1a56b0">${hauptkObj.email||p.email}</div>`:''}
+      ${hauptkObj.notiz?`<div style="font-size:11px;color:#888;margin-top:6px;font-style:italic">${hauptkObj.notiz}</div>`:''}
+    </div>
+  </div>
+  <div class="section"><div class="section-title"><span class="section-num">5</span> ERA-Einstiegsargument</div><div class="arg-box">${p.argument||'–'}</div></div>
+  <div class="pitch-box"><strong style="color:#C9A84C">Kernbotschaft:</strong> „${hauptkObj.name?hauptkObj.name.split(' ').pop():'Sehr geehrte Damen und Herren'}, ERA arbeitet ausschließlich auf Erfolgsbasis – wir investieren die Analyse vor, Sie zahlen nur, wenn wir Einsparungen realisieren. Ich würde gern 20 Minuten prüfen, ob das bei ${p.firma.split(' ').slice(0,3).join(' ')} ähnliches Potenzial gibt."</div>
+  <div class="section"><div class="section-title"><span class="section-num">6</span> Ersttermin-Strategie | Dos & Don'ts</div>
+    <div class="dos-donts">
+      <div class="dos"><div class="dos-title">✓ Dos – Vertrauen aufbauen</div><ul class="check-list">${dosItems.map(d=>`<li>${d}</li>`).join('')}</ul></div>
+      <div class="donts"><div class="donts-title">✗ Don'ts – Vermeiden</div><ul class="check-list">${dontsItems.map(d=>`<li>${d}</li>`).join('')}</ul></div>
+    </div>
+  </div>
+  <div class="footer"><span><strong>ERA Group</strong> | Fabian Krone | Radeberger Str. 25, 01099 Dresden</span><span>Stand: ${today_str} | ${p.id} | Vertraulich</span></div>
+</div></body></html>`;
+  window._lastFactsheetHtml = fsHtml;
+  const iframe = document.getElementById('factsheet-iframe');
+  if (iframe) { iframe.srcdoc = fsHtml; }
+  document.getElementById('factsheet-modal-title').textContent = 'Factsheet — ' + p.firma;
+  openModal('factsheet-modal');
+}
+
+
+function printAktivitaeten() {
+  const tod = today();
+  const offene = DB.aktivitaeten.filter(a => { const s=(a.status||'offen').toLowerCase(); return s==='offen'||s==='open'||s===''; }).sort((a,b)=>(a.followup||'9999').localeCompare(b.followup||'9999'));
+  const rows = offene.map(a => { const fu=a.followup||''; let badge='',color='#555'; if(fu<tod){badge='ÜBERFÄLLIG';color='#c0392b';}else if(fu===tod){badge='HEUTE';color='#856404';}else{badge=fmtDate(fu);color='#2d7a4e';} return `<tr style="border-bottom:1px solid #eee"><td style="padding:6px 10px;font-size:12px;color:${color};font-weight:600;white-space:nowrap">${badge}</td><td style="padding:6px 10px;font-size:12px;font-weight:500">${a.firma}</td><td style="padding:6px 10px;font-size:11px;color:#666">${a.ap||''}</td><td style="padding:6px 10px;font-size:11px;color:#555">${a.schritt||a.ergebnis||''}</td><td style="padding:6px 10px;font-size:11px;color:#888;white-space:nowrap">${a.kanal||''}</td><td style="padding:6px 10px;font-size:11px;color:#888;white-space:nowrap">${a.datum||''}</td></tr>`; }).join('');
+  const printHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Offene Aktivitäten</title><style>body{font-family:Arial,sans-serif;font-size:13px;margin:24px}.header{display:flex;justify-content:space-between;margin-bottom:16px;border-bottom:2px solid #0D1F3C;padding-bottom:8px}h1{font-size:16px;color:#0D1F3C;margin:0}table{width:100%;border-collapse:collapse}thead tr{background:#0D1F3C;color:white}thead th{padding:7px 10px;text-align:left;font-size:11px}</style></head><body><div class="header"><div><h1>Offene Aktivitäten – ERA Group CRM</h1><div style="font-size:11px;color:#888">Fabian Krone | ERA Group | Radeberger Str. 25, 01099 Dresden</div></div><div style="font-size:11px;color:#888">Stand: ${new Date().toLocaleDateString('de-DE')} | ${offene.length} offen</div></div><table><thead><tr><th>Fälligkeit</th><th>Unternehmen</th><th>Ansprechpartner</th><th>Nächster Schritt</th><th>Kanal</th><th>Datum</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+  window._lastFactsheetHtml = printHtml;
+  const win = window.open('','_blank');
+  if (!win) { toast('Popup-Blocker aktiv'); return; }
+  win.document.write(printHtml); win.document.close(); win.focus();
+  setTimeout(()=>win.print(), 800);
+}
+
+function printFactsheet() {
+  const content = window._lastFactsheetHtml;
+  if (!content) { toast('Bitte zuerst ein Factsheet öffnen'); return; }
+  const iframe = document.getElementById('factsheet-iframe');
+  if (iframe && iframe.contentWindow) { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); return; } catch(e) {} }
+  const blob = new Blob([content], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.target='_blank';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(url), 3000);
+  toast('Tab geöffnet — Cmd+P zum Drucken');
+}
+
+function saveFactsheetPDF() {
+  const content = window._lastFactsheetHtml;
+  const firma = window._lastFactsheetFirma || 'Factsheet';
+  if (!content) { toast('Bitte zuerst ein Factsheet öffnen'); return; }
+  const blob = new Blob([content], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const filename = 'Factsheet_' + firma.replace(/[^a-zA-Z0-9]/g,'_').slice(0,40) + '_ERA.html';
+  const a = document.createElement('a'); a.href=url; a.download=filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('✓ ' + filename + ' heruntergeladen');
+}
+
+function bereinigeDuplikate() {
+  const vorher = DB.aktivitaeten.length;
+  const seen = new Set();
+  DB.aktivitaeten = DB.aktivitaeten.filter(a => { const k=a._id||((a.eraId||a.firma)+'|'+a.datum+'|'+(a.ergebnis||'').slice(0,40)); if(seen.has(k))return false; seen.add(k); return true; });
+  saveData(); syncPush();
+  toast('✓ ' + (vorher-DB.aktivitaeten.length) + ' Duplikate entfernt');
+  renderAll();
+}
+
+function resetUndNeuLaden() {
+  if (!confirm('Lokale Daten zurücksetzen und neu aus Cloud laden?')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  DB = { prospects: JSON.parse(JSON.stringify(INIT_PROSPECTS)), aktivitaeten: [] };
+  toast('Lade Daten aus Cloud…');
+  syncPull().then(()=>toast('✓ Daten neu geladen'));
+}
+
+document.querySelectorAll('[data-view]').forEach(el => {
+  el.addEventListener('click', () => {
+    const view = el.dataset.view;
+    document.querySelectorAll('.nav-item[data-view]').forEach(n=>n.classList.remove('active'));
+    el.classList.add('active');
+    document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+    document.getElementById('view-'+view).classList.add('active');
+    if(view==='dashboard')renderDashboard();
+    if(view==='prospects')renderProspects();
+    if(view==='aktivitaeten')renderAktivitaeten();
+  });
+});
+
+function startAutoSync() { ensureTimestamps(); syncBoth(); setInterval(syncBoth,60000); }
+
+renderAll();
+startAutoSync();
+</script>
+</body>
+</html>
