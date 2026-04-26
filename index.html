@@ -1530,13 +1530,13 @@ function printFactsheet() {
   const content = window._lastFactsheetHtml;
   if (!content) { toast('Bitte zuerst ein Factsheet öffnen'); return; }
   const iframe = document.getElementById('factsheet-iframe');
-  if (iframe && iframe.contentWindow) { try { iframe.contentWindow.focus(); iframe.contentWindow.print(); return; } catch(e) {} }
-  const blob = new Blob([content], {type:'text/html;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.target='_blank';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
-  setTimeout(()=>URL.revokeObjectURL(url), 3000);
-  toast('Tab geöffnet — Cmd+P zum Drucken');
+  if (iframe && iframe.contentWindow) {
+    try { iframe.contentWindow.focus(); iframe.contentWindow.print(); return; } catch(e) {}
+  }
+  const win2 = window.open('', '_blank');
+  if (!win2) { toast('Popup-Blocker aktiv'); return; }
+  win2.document.write(content); win2.document.close(); win2.focus();
+  setTimeout(() => win2.print(), 800);
 }
 
 function saveFactsheetPDF() {
