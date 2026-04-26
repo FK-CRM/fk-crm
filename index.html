@@ -1525,16 +1525,6 @@ function printAktivitaetenListe() {
 }
 
 
-  const tod = today();
-  const offene = DB.aktivitaeten.filter(a => { const s=(a.status||'offen').toLowerCase(); return s==='offen'||s==='open'||s===''; }).sort((a,b)=>(a.followup||'9999').localeCompare(b.followup||'9999'));
-  const rows = offene.map(a => { const fu=a.followup||''; let badge='',color='#555'; if(fu<tod){badge='ÜBERFÄLLIG';color='#c0392b';}else if(fu===tod){badge='HEUTE';color='#856404';}else{badge=fmtDate(fu);color='#2d7a4e';} return `<tr style="border-bottom:1px solid #eee"><td style="padding:6px 10px;font-size:12px;color:${color};font-weight:600;white-space:nowrap">${badge}</td><td style="padding:6px 10px;font-size:12px;font-weight:500">${a.firma}</td><td style="padding:6px 10px;font-size:11px;color:#666">${a.ap||''}</td><td style="padding:6px 10px;font-size:11px;color:#555">${a.schritt||a.ergebnis||''}</td><td style="padding:6px 10px;font-size:11px;color:#888;white-space:nowrap">${a.kanal||''}</td><td style="padding:6px 10px;font-size:11px;color:#888;white-space:nowrap">${a.datum||''}</td></tr>`; }).join('');
-  const printHtml = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Offene Aktivitäten</title><style>body{font-family:Arial,sans-serif;font-size:13px;margin:24px}.header{display:flex;justify-content:space-between;margin-bottom:16px;border-bottom:2px solid #0D1F3C;padding-bottom:8px}h1{font-size:16px;color:#0D1F3C;margin:0}table{width:100%;border-collapse:collapse}thead tr{background:#0D1F3C;color:white}thead th{padding:7px 10px;text-align:left;font-size:11px}</style></head><body><div class="header"><div><h1>Offene Aktivitäten – ERA Group CRM</h1><div style="font-size:11px;color:#888">Fabian Krone | ERA Group | Radeberger Str. 25, 01099 Dresden</div></div><div style="font-size:11px;color:#888">Stand: ${new Date().toLocaleDateString('de-DE')} | ${offene.length} offen</div></div><table><thead><tr><th>Fälligkeit</th><th>Unternehmen</th><th>Ansprechpartner</th><th>Nächster Schritt</th><th>Kanal</th><th>Datum</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
-  window._lastFactsheetHtml = printHtml;
-  const win = window.open('','_blank');
-  if (!win) { toast('Popup-Blocker aktiv'); return; }
-  win.document.write(printHtml); win.document.close(); win.focus();
-  setTimeout(()=>win.print(), 800);
-}
 
 function printFactsheet() {
   const content = window._lastFactsheetHtml;
