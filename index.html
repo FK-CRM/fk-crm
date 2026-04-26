@@ -853,7 +853,6 @@ function renderDashboard() {
         style="flex-shrink:0;background:none;border:1px solid var(--border);border-radius:50%;width:24px;height:24px;cursor:pointer;font-size:12px;color:var(--text3);display:flex;align-items:center;justify-content:center" title="Abschließen">✓</button>
     </div>`;
   }).join('') : '<div style="padding:24px;text-align:center;color:var(--text3);font-size:13px">✓ Keine offenen Aktivitäten</div>';
-  >
   document.getElementById('pipeline').innerHTML = pipelineStages.map(s => {
     const count = ps.filter(p => p.status === s.name).length;
     const pct = ps.length ? Math.round(count/ps.length*100) : 0;
