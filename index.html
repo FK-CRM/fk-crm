@@ -879,9 +879,9 @@ function renderAll() {
 
 function updateSyncIndicator(state) { const el=document.getElementById('sync-indicator'); if(!el)return; if(state==='syncing'){el.textContent='↻ Synchronisiere…';el.style.color='rgba(255,255,255,.5)';}else if(state==='ok'){const now=new Date();el.textContent='✓ Sync '+now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');el.style.color='rgba(255,255,255,.5)';}else{el.textContent='✗ Sync Fehler';el.style.color='#f87171';} }
 
-let DB;
+// DB already declared above - just initialize from localStorage
 const saved = localStorage.getItem(STORAGE_KEY);
-if (saved) { try { DB=JSON.parse(saved); if(!DB.prospects)DB.prospects=JSON.parse(JSON.stringify(INIT_PROSPECTS)); if(!DB.aktivitaeten)DB.aktivitaeten=JSON.parse(JSON.stringify(INIT_AKTIVITAETEN)); } catch(e) { DB={prospects:JSON.parse(JSON.stringify(INIT_PROSPECTS)),aktivitaeten:JSON.parse(JSON.stringify(INIT_AKTIVITAETEN))}; } } else { DB={prospects:JSON.parse(JSON.stringify(INIT_PROSPECTS)),aktivitaeten:JSON.parse(JSON.stringify(INIT_AKTIVITAETEN))}; }
+if (saved) { try { const _d=JSON.parse(saved); if(_d.prospects)DB.prospects=_d.prospects; if(_d.aktivitaeten)DB.aktivitaeten=_d.aktivitaeten; } catch(e) { DB.prospects=JSON.parse(JSON.stringify(INIT_PROSPECTS)); DB.aktivitaeten=JSON.parse(JSON.stringify(INIT_AKTIVITAETEN)); } } else { DB.prospects=JSON.parse(JSON.stringify(INIT_PROSPECTS)); DB.aktivitaeten=JSON.parse(JSON.stringify(INIT_AKTIVITAETEN)); }
 
 
 
