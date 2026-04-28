@@ -947,12 +947,28 @@ async function syncPull() {
     }
     if (aResp.ok) {
       const aData = await aResp.json();
-      const cloudAkts = aData.length > 0 ? aData.map(r => r.data) : [];
-      const cloudIds = new Set(cloudAkts.map(a => a._id).filter(Boolean));
-      const lokalNeu = DB.aktivitaeten.filter(a => a._id && !cloudIds.has(a._id));
-      const alle = [...cloudAkts, ...lokalNeu];
+      const cloudAkts = aData.length > 0 ? aData.map(r => ({ ...r.data, _cloudTs: new Date(r.updated_at||0).getTime() })) : [];
+      const cloudById = {};
+      cloudAkts.forEach(a => { if (a._id) cloudById[a._id] = a; });
+      // Merge: lokale Version gewinnt wenn _ts neuer als Cloud
+      const lokalById = {};
+      DB.aktivitaeten.forEach(a => { if (a._id) lokalById[a._id] = a; });
+      const merged = [];
+      // Cloud-Einträge: lokal gewinnt wenn neuer
+      Object.keys(cloudById).forEach(id => {
+        const cloud = cloudById[id];
+        const local = lokalById[id];
+        if (local && local._ts && local._ts > (cloud._cloudTs||0)) {
+          merged.push(local);
+        } else {
+          const { _cloudTs, ...cleanCloud } = cloud;
+          merged.push(cleanCloud);
+        }
+      });
+      // Nur lokal vorhandene (noch nicht in Cloud)
+      DB.aktivitaeten.filter(a => a._id && !cloudById[a._id]).forEach(a => merged.push(a));
       const seen = new Set();
-      DB.aktivitaeten = alle.filter(a => {
+      DB.aktivitaeten = merged.filter(a => {
         const k = a._id || ((a.firma||'')+'|'+(a.datum||'')+'|'+(a.ergebnis||'').slice(0,20));
         if (seen.has(k)) return false; seen.add(k); return true;
       }).sort((a,b) => (b.datum||'').localeCompare(a.datum||''));
@@ -1172,6 +1188,7 @@ function saveAktivitaet() {
     bearbeiter: 'Fabian Krone', status: 'offen'
   };
   if (!akt._id) akt._id = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+  akt._ts = Date.now();
   const newStatus = document.getElementById('a-status-change')?.value;
   if (newStatus && p) { p.status = newStatus; p._ts = Date.now(); }
   DB.aktivitaeten.unshift(akt);
@@ -1204,6 +1221,7 @@ function saveFolgeAktivitaet() {
   if (!schritt) { toast('Bitte Nächsten Schritt eingeben'); return; }
   const folge = {
     _id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
+    _ts: Date.now(),
     datum: today(),
     firma,
     eraId: DB.prospects.find(x=>x.firma===firma)?.id||'',
