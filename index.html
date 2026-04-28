@@ -442,6 +442,12 @@ textarea { min-height: 70px; resize: vertical; }
 
     <!-- PROSPECTS -->
     <div class="view" id="view-prospects">
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:12px;color:var(--text3);font-weight:600">FK-SDA Export:</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportSdaHtml()" style="font-size:12px">📄 HTML / PDF</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportSdaExcel()" style="font-size:12px">📊 Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportSdaProfiles()" style="font-size:12px">📋 Profile (1 Seite / Prospect)</button>
+      </div>
       <div class="card">
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
           <div style="position:relative;margin-bottom:8px">
@@ -460,7 +466,13 @@ textarea { min-height: 70px; resize: vertical; }
               <option value="wice">🔒 Nur Wice</option>
               <option value="eigen">Nur Eigene</option>
             </select>
-            <select class="filter-select" id="p-filter-prio" onchange="renderProspects()">
+            <select class="filter-select" id="p-filter-sda" onchange="renderProspects()">
+            <option value="">Alle SDA</option>
+            <option value="FK">FK-SDA</option>
+            <option value="ERA">ERA-SDA</option>
+            <option value="offen">Nicht zugewiesen</option>
+          </select>
+          <select class="filter-select" id="p-filter-prio" onchange="renderProspects()">
               <option value="">Alle Prio</option>
               <option value="5">⭐⭐⭐⭐⭐</option>
               <option value="4">⭐⭐⭐⭐</option>
@@ -992,11 +1004,15 @@ function renderProspects() {
   const q = (document.getElementById('p-search')?.value||'').toLowerCase();
   const fs = document.getElementById('p-filter-status')?.value||'';
   const fw = document.getElementById('p-filter-wice')?.value||'';
+  const fsda = document.getElementById('p-filter-sda')?.value||'';
   const fp = document.getElementById('p-filter-prio')?.value||'';
   const so = document.getElementById('p-sort')?.value||'prio-desc';
   let rows = DB.prospects.filter(p => {
     if (fs && p.status !== fs) return false;
     if (fw === 'wice' && p.quelle !== 'Wice') return false;
+    if (fsda === 'FK' && p.sda !== 'FK') return false;
+    if (fsda === 'ERA' && p.sda !== 'ERA') return false;
+    if (fsda === 'offen' && p.sda) return false;
     if (fw === 'eigen' && p.quelle === 'Wice') return false;
     if (fp && String(p.prio) !== fp) return false;
     if (q) { const s = (p.id+' '+p.firma+' '+p.ap+' '+p.branche).toLowerCase(); if (!s.includes(q)) return false; }
@@ -1032,6 +1048,18 @@ function renderProspects() {
       <td>${statusPill(p.status)}</td>
       <td>${prio(p.prio)}</td>
       <td>${wiceBtn}</td>
+      <td>
+        <div style="display:flex;gap:3px">
+          <button onclick="event.stopPropagation();setSda('${esc(p.firma)}','ERA')" 
+            style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;font-weight:600;
+            background:${p.sda==='ERA'?'#1a56b0':'none'};color:${p.sda==='ERA'?'white':'var(--text3)'};
+            border:1px solid ${p.sda==='ERA'?'#1a56b0':'var(--border)'}">ERA</button>
+          <button onclick="event.stopPropagation();setSda('${esc(p.firma)}','FK')"
+            style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;font-weight:600;
+            background:${p.sda==='FK'?'#C9A84C':'none'};color:${p.sda==='FK'?'white':'var(--text3)'};
+            border:1px solid ${p.sda==='FK'?'#C9A84C':'var(--border)'}">FK</button>
+        </div>
+      </td>
       <td style="font-size:12px;color:var(--text3)">${p.followup?fmtDate(p.followup):''}</td>
       <td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc((p.argument||'').slice(0,80))}${(p.argument||'').length>80?'…':''}</td>
     </tr>`;
@@ -1806,6 +1834,216 @@ document.querySelectorAll('[data-view]').forEach(el => {
     if(view==='aktivitaeten')renderAktivitaeten();
   });
 });
+
+
+// ── SDA MANAGEMENT ──
+function setSda(firma, sda) {
+  const p = DB.prospects.find(x => x.firma === firma);
+  if (!p) return;
+  if (p.sda === sda) {
+    p.sda = ''; // toggle off
+    toast('SDA-Zuweisung für ' + firma + ' entfernt');
+  } else {
+    p.sda = sda;
+    toast((sda === 'FK' ? '🟡 FK-SDA' : '🔵 ERA-SDA') + ': ' + firma);
+  }
+  p._ts = Date.now();
+  saveData();
+  renderProspects();
+}
+
+// ── SDA EXPORT: HTML / PDF ──
+function exportSdaHtml() {
+  const fkProspects = DB.prospects.filter(p => p.sda === 'FK');
+  if (!fkProspects.length) { toast('Keine FK-SDA Prospects zugewiesen'); return; }
+
+  const rows = fkProspects.map((p, i) => {
+    const kt = (p.kostentreiber||'').split(/,(?![^(]*\))/).map(k => {
+      const m = k.trim().match(/^(.+?)\s*\((★+)\)\s*$/);
+      return m ? `<li>${m[1].trim()} <span style="color:#C9A84C">${m[2]}</span></li>` : `<li>${k.trim()}</li>`;
+    }).join('');
+    return `<div style="page-break-inside:avoid;margin-bottom:32px;border:1px solid #dde3ee;border-radius:6px;overflow:hidden">
+      <div style="background:#0D1F3C;color:white;padding:10px 16px;display:flex;justify-content:space-between">
+        <div><strong style="font-size:15px">${p.firma}</strong> <span style="color:#C9A84C;font-size:11px;margin-left:8px">${p.id}</span></div>
+        <div style="font-size:11px;color:rgba(255,255,255,.6)">${p.branche||''} · Prio ${'★'.repeat(p.prio||3)}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:0">
+        <div style="padding:12px 16px;border-right:1px solid #eee">
+          <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">ANSPRECHPARTNER</div>
+          <div style="font-weight:700;font-size:14px">${p.ap||'–'}</div>
+          <div style="font-size:12px;color:#666;margin-bottom:8px">${p.pos||''}</div>
+          ${p.tel?`<div style="font-size:12px;margin-bottom:3px">📞 <a href="tel:${p.tel}" style="color:#1a56b0">${p.tel}</a></div>`:''}
+          ${p.email?`<div style="font-size:12px;margin-bottom:3px">✉ <a href="mailto:${p.email}" style="color:#1a56b0">${p.email}</a></div>`:''}
+          ${p.website?`<div style="font-size:12px">🌐 ${p.website}</div>`:''}
+        </div>
+        <div style="padding:12px 16px">
+          <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">STAMMDATEN</div>
+          ${p.adresse?`<div style="font-size:12px;margin-bottom:3px">📍 ${p.adresse}</div>`:''}
+          ${p.ma?`<div style="font-size:12px;margin-bottom:3px">👥 ${p.ma} Mitarbeiter</div>`:''}
+          ${p.umsatz?`<div style="font-size:12px;margin-bottom:3px">💶 ca. ${p.umsatz} Mio. € Umsatz</div>`:''}
+          ${p.disc?`<div style="font-size:12px;margin-top:6px"><span style="background:#e8eaf0;padding:2px 8px;border-radius:3px;font-size:11px;font-weight:600">DISC: ${p.disc}</span></div>`:''}
+        </div>
+      </div>
+      ${kt?`<div style="padding:10px 16px;border-top:1px solid #eee;background:#f9f9f9">
+        <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">KOSTENTREIBER</div>
+        <ul style="list-style:none;padding:0;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;font-size:12px">${kt}</ul>
+      </div>`:''}
+      ${p.argument?`<div style="padding:10px 16px;border-top:1px solid #eee;background:#EEF2FF">
+        <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">ERA-ARGUMENT</div>
+        <div style="font-size:12px;line-height:1.6;color:#333">${p.argument}</div>
+      </div>`:''}
+      ${p.ereignisse?`<div style="padding:10px 16px;border-top:1px solid #eee">
+        <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">RELEVANTE EREIGNISSE / PRESSE</div>
+        <div style="font-size:12px;line-height:1.6;color:#555">${p.ereignisse}</div>
+      </div>`:''}
+    </div>`;
+  }).join('');
+
+  const printHtml = `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
+  <title>FK-SDA Prospect-Liste</title>
+  <style>
+    body{font-family:Arial,sans-serif;font-size:13px;margin:28px;color:#222}
+    .header{display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:24px;border-bottom:3px solid #0D1F3C;padding-bottom:12px}
+    h1{font-size:18px;color:#0D1F3C;margin:0}
+    .sub{font-size:11px;color:#888}
+    .footer{margin-top:24px;font-size:10px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:8px}
+    @media print{body{margin:16px}@page{margin:1.5cm}}
+  </style></head><body>
+  <div class="header">
+    <div><h1>FK-SDA Prospect-Liste</h1>
+    <div class="sub">Fabian Krone | ERA Group | Radeberger Str. 25, 01099 Dresden</div></div>
+    <div class="sub">Stand: ${new Date().toLocaleDateString('de-DE')} | ${fkProspects.length} Prospects | Vertraulich</div>
+  </div>
+  ${rows}
+  <div class="footer">FK-SDA Prospect-Liste | Fabian Krone | ERA Group | ${new Date().toLocaleDateString('de-DE')} | Vertraulich</div>
+  </body></html>`;
+
+  const win = window.open('','_blank');
+  if (!win) { toast('Popup-Blocker aktiv'); return; }
+  win.document.write(printHtml); win.document.close(); win.focus();
+  setTimeout(() => win.print(), 800);
+}
+
+// ── SDA EXPORT: EXCEL ──
+function exportSdaExcel() {
+  const fkProspects = DB.prospects.filter(p => p.sda === 'FK');
+  if (!fkProspects.length) { toast('Keine FK-SDA Prospects zugewiesen'); return; }
+
+  const rows = [
+    ['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio €)','DISC','Status','Priorität','Kostentreiber','ERA-Argument','Ereignisse / Presse']
+  ];
+  fkProspects.forEach(p => {
+    rows.push([
+      p.id, p.firma, p.ap||'', p.pos||'', p.tel||'', p.email||'', p.website||'',
+      p.branche||'', p.adresse||'', p.ma||'', p.umsatz||'', p.disc||'',
+      p.status||'', p.prio||'',
+      (p.kostentreiber||'').replace(/\(★+\)/g,'').replace(/,/g,' |'),
+      p.argument||'', p.ereignisse||''
+    ]);
+  });
+
+  // Build CSV (Excel-compatible with BOM)
+  const bom = '﻿';
+  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('
+');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'FK_SDA_Prospects_' + new Date().toISOString().slice(0,10) + '.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('✓ Excel-CSV exportiert (' + fkProspects.length + ' Prospects)');
+}
+
+// ── SDA EXPORT: PROFILE (1 Seite pro Prospect) ──
+function exportSdaProfiles() {
+  const fkProspects = DB.prospects.filter(p => p.sda === 'FK');
+  if (!fkProspects.length) { toast('Keine FK-SDA Prospects zugewiesen'); return; }
+
+  const pages = fkProspects.map((p, i) => {
+    const kt = (p.kostentreiber||'').split(/,(?![^(]*\))/).map(k => {
+      const m = k.trim().match(/^(.+?)\s*\((★+)\)\s*$/);
+      const label = m ? m[1].trim() : k.trim();
+      const stars = m ? m[2] : '';
+      return `<tr><td style="padding:5px 10px;font-size:12px;font-weight:600;border-bottom:1px solid #eee">${label}</td><td style="padding:5px 10px;font-size:13px;color:#C9A84C;border-bottom:1px solid #eee">${stars}</td></tr>`;
+    }).join('');
+    const dosItems = (p.ersttermin_dos||'').split('·').map(d=>d.trim()).filter(Boolean);
+    const dontsItems = (p.ersttermin_donts||'').split('·').map(d=>d.trim()).filter(Boolean);
+    const pageBreak = i < fkProspects.length-1 ? 'page-break-after:always' : '';
+
+    return `<div style="${pageBreak};padding:24px 32px;font-family:Arial,sans-serif">
+      <div style="background:#0D1F3C;color:white;padding:14px 20px;border-radius:4px 4px 0 0;display:flex;justify-content:space-between;align-items:center">
+        <div>
+          <div style="font-size:18px;font-weight:700">${p.firma}</div>
+          <div style="font-size:11px;color:rgba(255,255,255,.6);margin-top:2px">${p.branche||''} · ${p.id} · Priorität ${'★'.repeat(p.prio||3)}</div>
+        </div>
+        <div style="text-align:right;font-size:11px;color:rgba(255,255,255,.5)">FK-SDA Gesprächsvorbereitung<br>Stand: ${new Date().toLocaleDateString('de-DE')}</div>
+      </div>
+      <div style="height:3px;background:linear-gradient(to right,#C9A84C,#e8c97a,#C9A84C);margin-bottom:16px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:16px">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:8px">ANSPRECHPARTNER</div>
+          <div style="font-size:16px;font-weight:700;color:#0D1F3C">${p.ap||'–'}</div>
+          <div style="font-size:12px;color:#666;margin-bottom:10px">${p.pos||''}</div>
+          ${p.tel?`<div style="font-size:13px;margin-bottom:4px">📞 <strong>${p.tel}</strong></div>`:''}
+          ${p.email?`<div style="font-size:13px;margin-bottom:4px">✉ ${p.email}</div>`:''}
+          ${p.website?`<div style="font-size:12px;color:#1a56b0">${p.website}</div>`:''}
+          ${p.disc?`<div style="margin-top:10px"><span style="background:#0D1F3C;color:#C9A84C;font-size:11px;font-weight:700;padding:3px 10px;border-radius:3px">DISC: ${p.disc}</span></div>`:''}
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:8px">UNTERNEHMEN</div>
+          ${p.adresse?`<div style="font-size:12px;margin-bottom:4px">📍 ${p.adresse}</div>`:''}
+          ${p.ma?`<div style="font-size:12px;margin-bottom:4px">👥 ${p.ma} Mitarbeiter</div>`:''}
+          ${p.umsatz?`<div style="font-size:12px;margin-bottom:4px">💶 ca. ${p.umsatz} Mio. € Umsatz</div>`:''}
+          ${p.rechtsform?`<div style="font-size:12px;color:#888">${p.rechtsform}</div>`:''}
+        </div>
+      </div>
+      ${kt?`<div style="margin-bottom:16px">
+        <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">KOSTENTREIBER & ERA-RELEVANZ</div>
+        <table style="width:100%;border-collapse:collapse;border:1px solid #eee">
+          <thead><tr style="background:#0D1F3C;color:white"><th style="padding:6px 10px;text-align:left;font-size:11px">Kostenblock</th><th style="padding:6px 10px;text-align:left;font-size:11px;width:80px">Prio</th></tr></thead>
+          <tbody>${kt}</tbody>
+        </table>
+      </div>`:''}
+      ${p.argument?`<div style="margin-bottom:16px">
+        <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">ERA-EINSTIEGSARGUMENT</div>
+        <div style="background:#EEF2FF;border-left:4px solid #0D1F3C;padding:10px 14px;font-size:12px;line-height:1.7;border-radius:0 4px 4px 0">${p.argument}</div>
+      </div>`:''}
+      ${p.ereignisse?`<div style="margin-bottom:16px">
+        <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">RELEVANTE EREIGNISSE / PRESSE</div>
+        <div style="background:#fffbf0;border-left:4px solid #C9A84C;padding:10px 14px;font-size:12px;line-height:1.7;border-radius:0 4px 4px 0">${p.ereignisse}</div>
+      </div>`:''}
+      ${(dosItems.length||dontsItems.length)?`<div>
+        <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:8px">ERSTTERMIN-STRATEGIE</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div style="background:#f0faf4;border:1px solid #b8e6cc;border-radius:4px;padding:10px 12px">
+            <div style="font-size:10px;font-weight:700;color:#2d7a4e;margin-bottom:6px">✓ DOS</div>
+            <ul style="list-style:none;padding:0;margin:0">${dosItems.map(d=>`<li style="font-size:11px;padding:2px 0;border-bottom:1px solid rgba(0,0,0,.05)">✓ ${d}</li>`).join('')}</ul>
+          </div>
+          <div style="background:#fff4f4;border:1px solid #f5c6c6;border-radius:4px;padding:10px 12px">
+            <div style="font-size:10px;font-weight:700;color:#c0392b;margin-bottom:6px">✗ DON'TS</div>
+            <ul style="list-style:none;padding:0;margin:0">${dontsItems.map(d=>`<li style="font-size:11px;padding:2px 0;border-bottom:1px solid rgba(0,0,0,.05)">✗ ${d}</li>`).join('')}</ul>
+          </div>
+        </div>
+      </div>`:''}
+      <div style="margin-top:20px;padding-top:8px;border-top:1px solid #eee;font-size:10px;color:#aaa;display:flex;justify-content:space-between">
+        <span>Fabian Krone | ERA Group | Radeberger Str. 25, 01099 Dresden</span>
+        <span>${p.id} | Vertraulich</span>
+      </div>
+    </div>`;
+  }).join('<div style="height:1px;background:#ccc;margin:0 32px"></div>');
+
+  const printHtml = `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8">
+  <title>FK-SDA Profile</title>
+  <style>@media print{@page{margin:0}body{margin:0}}</style>
+  </head><body>${pages}</body></html>`;
+
+  const win = window.open('','_blank');
+  if (!win) { toast('Popup-Blocker aktiv'); return; }
+  win.document.write(printHtml); win.document.close(); win.focus();
+  setTimeout(() => win.print(), 800);
+}
 
 function startAutoSync() { ensureTimestamps(); syncBoth(); setInterval(syncBoth,60000); }
 
