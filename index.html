@@ -642,6 +642,8 @@ textarea { min-height: 70px; resize: vertical; }
   <div class="modal">
     <div class="modal-head"><h3>Abgeschlossen — Folgeschritt?</h3><button class="btn btn-ghost btn-icon" onclick="closeFolgeModal()">✕</button></div>
     <div class="modal-body">
+      <input type="hidden" id="folge-firma">
+      <input type="hidden" id="folge-ap">
       <div id="folge-info" style="background:var(--success-light);border-radius:var(--radius);padding:10px 14px;margin-bottom:16px;font-size:13px;color:var(--success)"></div>
       <div class="form-group"><label>Nächster Schritt *</label><textarea id="folge-schritt" placeholder="Was ist konkret zu tun?"></textarea></div>
       <div class="form-grid">
@@ -1184,37 +1186,54 @@ function abschliessen(idx) {
   const akt = DB.aktivitaeten[idx];
   akt.status = 'erledigt';
   saveData();
-  const folgeId = Date.now().toString(36) + Math.random().toString(36).slice(2,6);
-  document.getElementById('folge-info').textContent = '✓ ' + akt.firma + (akt.schritt?' — '+akt.schritt.slice(0,70):'');
-  document.getElementById('f-firma').value = akt.firma;
-  document.getElementById('f-ap').value = akt.ap||'';
-  document.getElementById('f-datum').value = today();
+  // Folge-Modal befüllen (IDs aus dem Modal-HTML: folge-schritt, folge-followup, folge-kanal, folge-typ)
+  document.getElementById('folge-info').textContent = '✓ ' + akt.firma + (akt.schritt ? ' — ' + akt.schritt.slice(0,70) : ' — Aktivität abgeschlossen');
+  document.getElementById('folge-firma').value = akt.firma;
+  document.getElementById('folge-ap').value = akt.ap||'';
+  document.getElementById('folge-schritt').value = '';
+  document.getElementById('folge-followup').value = '';
+  document.getElementById('folge-kanal').value = 'LinkedIn';
+  document.getElementById('folge-prospect-status').value = '';
   openModal('folge-modal');
   renderAll();
 }
 
-function saveFolge() {
-  const firma = document.getElementById('f-firma').value;
+function saveFolgeAktivitaet() {
+  const firma = document.getElementById('folge-firma').value;
+  const schritt = document.getElementById('folge-schritt').value.trim();
+  if (!schritt) { toast('Bitte Nächsten Schritt eingeben'); return; }
   const folge = {
     _id: Date.now().toString(36) + Math.random().toString(36).slice(2,6),
-    datum: document.getElementById('f-datum').value || today(),
+    datum: today(),
     firma,
     eraId: DB.prospects.find(x=>x.firma===firma)?.id||'',
-    ap: document.getElementById('f-ap').value,
-    kanal: document.getElementById('f-kanal')?.value||'',
-    typ: document.getElementById('f-typ')?.value||'',
+    ap: document.getElementById('folge-ap').value||'',
+    kanal: document.getElementById('folge-kanal').value||'',
+    typ: document.getElementById('folge-typ').value||'',
     ergebnis: '',
-    schritt: document.getElementById('f-schritt').value,
-    followup: document.getElementById('f-followup').value,
+    schritt,
+    followup: document.getElementById('folge-followup').value||'',
     bearbeiter: 'Fabian Krone',
     status: 'offen'
   };
+  // Prospect-Status ändern falls gewählt
+  const newStatus = document.getElementById('folge-prospect-status').value;
+  if (newStatus) {
+    const p = DB.prospects.find(x=>x.firma===firma);
+    if (p) { p.status = newStatus; p._ts = Date.now(); }
+  }
   DB.aktivitaeten.unshift(folge);
   saveData();
   closeModal('folge-modal');
-  toast('✓ Folge-Aktivität angelegt');
+  toast('✓ Folge-Aktivität für ' + firma + ' angelegt');
   renderAll();
 }
+
+function closeFolgeModal() {
+  closeModal('folge-modal');
+}
+
+function saveFolge() { saveFolgeAktivitaet(); } // Alias für Rückwärtskompatibilität
 
 // ── PROSPECT ACTIONS ──
 function setWice(firma) {
