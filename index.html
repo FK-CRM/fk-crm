@@ -1,4 +1,4 @@
-<!DOCTYPE html> 
+<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -882,7 +882,7 @@ function renderDashboard() {
         <div style="height:6px;width:${pct}%;background:var(--accent-mid);border-radius:3px"></div>
       </div>
     </div>`;
-  }).join('');
+  }).join('\r\n');
 }
 
 function renderAll() {
@@ -1945,8 +1945,7 @@ function exportSdaExcel() {
 
   // Build CSV (Excel-compatible with BOM)
   const bom = '﻿';
-  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('
-');
+  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
