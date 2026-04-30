@@ -482,11 +482,14 @@ textarea { min-height: 70px; resize: vertical; }
               <option value="1">⭐</option>
             </select>
             <select class="filter-select" id="p-sort" onchange="renderProspects()">
-              <option value="prio-desc">Priorität ↓</option>
-              <option value="prio-asc">Priorität ↑</option>
+              <option value="prio-desc">Priorität ↓ (hoch→tief)</option>
+              <option value="prio-asc">Priorität ↑ (tief→hoch)</option>
+              <option value="status-asc">Status A→Z</option>
+              <option value="followup-asc">Follow-up ↑ (früh→spät)</option>
+              <option value="followup-desc">Follow-up ↓ (spät→früh)</option>
               <option value="firma-asc">Firma A→Z</option>
-              <option value="followup-asc">Follow-up ↑</option>
-              <option value="status">Status</option>
+              <option value="firma-desc">Firma Z→A</option>
+              <option value="id-asc">ERA-ID ↑</option>
             </select>
             <div style="margin-left:auto;font-size:12px;color:var(--text3)" id="p-count"></div>
           </div>
@@ -494,13 +497,14 @@ textarea { min-height: 70px; resize: vertical; }
         <div style="overflow-x:auto">
           <table class="data-table">
             <thead><tr>
-              <th style="width:80px">ERA-ID</th>
-              <th>Unternehmen</th>
+              <th style="width:80px;cursor:pointer" onclick="setSort('id-asc')" title="Nach ERA-ID sortieren">ERA-ID ↕</th>
+              <th style="cursor:pointer" onclick="setSort('firma-asc')" title="Nach Firma sortieren">Unternehmen ↕</th>
               <th>Ansprechpartner</th>
-              <th style="width:110px">Status</th>
-              <th style="width:60px">Prio</th>
+              <th style="width:110px;cursor:pointer" onclick="setSort('status-asc')" title="Nach Status sortieren">Status ↕</th>
+              <th style="width:60px;cursor:pointer" onclick="setSort('prio-desc')" title="Nach Priorität sortieren">Prio ↕</th>
               <th style="width:70px;background:linear-gradient(135deg,#1a3a6e,#0d1f3c);color:#7eb8f7" title="In Wice geclaimer Prospect">🔒 Wice</th>
-              <th style="width:100px">Follow-up</th>
+              <th style="width:60px">SDA</th>
+              <th style="width:100px;cursor:pointer" onclick="setSort('followup-asc')" title="Nach Follow-up sortieren">Follow-up ↕</th>
               <th>ERA-Argument</th>
             </tr></thead>
             <tbody id="prospects-tbody"></tbody>
@@ -1023,8 +1027,26 @@ function renderProspects() {
     if (so === 'prio-desc') return (b.prio||0)-(a.prio||0);
     if (so === 'prio-asc') return (a.prio||0)-(b.prio||0);
     if (so === 'firma-asc') return (a.firma||'').localeCompare(b.firma||'');
-    if (so === 'followup-asc') return (a.followup||'9999').localeCompare(b.followup||'9999');
-    if (so === 'status') return (a.status||'').localeCompare(b.status||'');
+    if (so === 'firma-desc') return (b.firma||'').localeCompare(a.firma||'');
+    if (so === 'followup-asc') {
+      const af = a.followup||'9999-99-99', bf = b.followup||'9999-99-99';
+      return af.localeCompare(bf);
+    }
+    if (so === 'followup-desc') {
+      const af = a.followup||'', bf = b.followup||'';
+      if (!af && !bf) return 0;
+      if (!af) return 1;
+      if (!bf) return -1;
+      return bf.localeCompare(af);
+    }
+    if (so === 'status-asc') {
+      // Custom status order: Ersttermin > Angebot > Verhandlung > Kontaktiert > Recherche > Kein Interesse
+      const order = {'Ersttermin':1,'Angebot':2,'Verhandlung':3,'Gewonnen':4,'Kontaktiert':5,'Recherche':6,'Kein Interesse':7};
+      return (order[a.status]||9)-(order[b.status]||9);
+    }
+    if (so === 'id-asc') {
+      return parseInt((a.id||'').replace('ERA-',''))-parseInt((b.id||'').replace('ERA-',''));
+    }
     return 0;
   });
   const countEl = document.getElementById('p-count');
@@ -1838,7 +1860,23 @@ document.querySelectorAll('[data-view]').forEach(el => {
 
 
 // ── SDA MANAGEMENT ──
-function setSda(firma, sda) {
+function setSort(val) {
+  const el = document.getElementById('p-sort');
+  if (!el) return;
+  // Toggle direction if same column clicked again
+  const current = el.value;
+  const toggleMap = {
+    'prio-desc': 'prio-asc', 'prio-asc': 'prio-desc',
+    'firma-asc': 'firma-desc', 'firma-desc': 'firma-asc',
+    'followup-asc': 'followup-desc', 'followup-desc': 'followup-asc',
+    'status-asc': 'status-asc',
+    'id-asc': 'id-asc'
+  };
+  el.value = (current === val && toggleMap[val] !== val) ? toggleMap[val] : val;
+  renderProspects();
+}
+
+
   const p = DB.prospects.find(x => x.firma === firma);
   if (!p) return;
   if (p.sda === sda) {
