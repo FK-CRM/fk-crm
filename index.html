@@ -1160,7 +1160,7 @@ function openDetail(firma) {
         <div class="card" style="margin-bottom:12px">
           <div class="card-header"><div class="card-title">Stammdaten</div></div>
           <div style="padding:12px 16px">
-            ${[['ERA-ID',p.id],['Rechtsform',p.rechtsform],['Gegründet',p.gruendung],['Branche',p.branche],['Sitz / Adresse',p.adresse],['Website',p.website?`<a href="https://${p.website.replace('https://','').replace('http://','')||''}" target="_blank" style="color:var(--accent-mid)">${p.website}</a>`:null],['Telefon',p.tel?`<a href="tel:${p.tel}" class="btn btn-secondary btn-sm" style="font-size:12px">📞 ${p.tel}</a>`:null],['E-Mail',p.email?`<a href="mailto:${p.email}" style="color:var(--accent-mid);font-size:12px">${p.email}</a>`:null],['Umsatz (Mio €)',p.umsatz],['Mitarbeiter',p.ma],['Kontaktkanal',p.kanal||p.quelle],['Quelle',p.quelle]].filter(([,v])=>v).map(([k,v])=>`<div style="display:flex;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div style="width:110px;color:var(--text3);flex-shrink:0">${k}</div><div>${typeof v==='string'?esc(v):v}</div></div>`).join('')}
+            ${[['ERA-ID',p.id],['Rechtsform',p.rechtsform],['Gegründet',p.gruendung],['Branche',p.branche],['Sitz / Adresse',p.adresse],['Website',p.website?`<a href="https://${p.website.replace('https://','').replace('http://','')||''}" target="_blank" style="color:var(--accent-mid)">${p.website}</a>`:null],['Telefon',p.tel?`<a href="tel:${p.tel}" class="btn btn-secondary btn-sm" style="font-size:12px">📞 ${p.tel}</a>`:null],['E-Mail',p.email?`<a href="mailto:${p.email}" style="color:var(--accent-mid);font-size:12px">${p.email}</a>`:null],['Umsatz (Mio €)',p.umsatz],['Mitarbeiter',p.ma],['Kontaktkanal',p.kanal||p.quelle],['Quelle',p.quelle]].filter(([,v])=>v).map(([k,v])=>`<div style="display:flex;padding:5px 0;border-bottom:1px solid var(--border);font-size:12px"><div style="width:110px;color:var(--text3);flex-shrink:0">${k}</div><div>${v}</div></div>`).join('')}
           </div>
         </div>
         <div class="card" style="margin-bottom:12px">
@@ -1957,10 +1957,14 @@ function exportSdaHtml() {
   <div class="footer">FK-SDA Prospect-Liste | Fabian Krone | ERA Group | ${new Date().toLocaleDateString('de-DE')} | Vertraulich</div>
   </body></html>`;
 
-  const win = window.open('','_blank');
-  if (!win) { toast('Popup-Blocker aktiv'); return; }
-  win.document.write(printHtml); win.document.close(); win.focus();
-  setTimeout(() => win.print(), 800);
+  const blob = new Blob([printHtml], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'FK_SDA_Liste_' + new Date().toISOString().slice(0,10) + '.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('✓ HTML-Liste heruntergeladen — im Browser öffnen und Cmd+P zum Drucken / Als PDF speichern');
 }
 
 // ── SDA EXPORT: EXCEL ──
@@ -1982,8 +1986,8 @@ function exportSdaExcel() {
   });
 
   // Build CSV (Excel-compatible with BOM)
-  const bom = '﻿';
-  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('');
+  const bom = '\uFEFF';
+  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('\r\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
@@ -2077,10 +2081,14 @@ function exportSdaProfiles() {
   <style>@media print{@page{margin:0}body{margin:0}}</style>
   </head><body>${pages}</body></html>`;
 
-  const win = window.open('','_blank');
-  if (!win) { toast('Popup-Blocker aktiv'); return; }
-  win.document.write(printHtml); win.document.close(); win.focus();
-  setTimeout(() => win.print(), 800);
+  const blob = new Blob([printHtml], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'FK_SDA_Profile_' + new Date().toISOString().slice(0,10) + '.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('✓ Profile heruntergeladen — im Browser öffnen und Cmd+P zum Drucken');
 }
 
 function startAutoSync() { ensureTimestamps(); syncBoth(); setInterval(syncBoth,60000); }
