@@ -1876,7 +1876,7 @@ function setSort(val) {
   renderProspects();
 }
 
-
+function setSda(firma, sda) {
   const p = DB.prospects.find(x => x.firma === firma);
   if (!p) return;
   if (p.sda === sda) {
