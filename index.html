@@ -615,8 +615,12 @@ textarea { min-height: 70px; resize: vertical; }
         <input class="form-input" id="k-rolle" placeholder="z.B. CFO, Einkaufsleiter" style="width:100%">
       </div>
       <div>
-        <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">Telefon</label>
-        <input class="form-input" id="k-tel" placeholder="+49 30 …" style="width:100%">
+        <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">Telefon (Festnetz)</label>
+        <input class="form-input" id="k-tel" placeholder="+49 30 123456" style="width:100%">
+      </div>
+      <div>
+        <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">Mobil</label>
+        <input class="form-input" id="k-mobil" placeholder="+49 172 123456" style="width:100%">
       </div>
       <div>
         <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:4px">E-Mail</label>
@@ -876,6 +880,18 @@ function renderDashboard() {
       <div style="flex:1;min-width:0">
         <div style="font-weight:600;font-size:13px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.firma)}</div>
         <div style="font-size:12px;color:var(--text2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(a.schritt||a.ergebnis||'')}</div>
+        ${(function() {
+          const pr = ps.find(x => x.firma === a.firma);
+          if (!pr) return '';
+          const hk = pr.hauptkontakt || pr.ap;
+          const hkObj = (pr.weitereKontakte||[]).find(k=>k.name===hk) || {name:pr.ap,rolle:pr.pos,tel:pr.tel,mobil:pr.mobil};
+          if (!hkObj || !hkObj.name) return '';
+          const telNr = hkObj.mobil || hkObj.tel || pr.tel || '';
+          return `<div style="font-size:11px;color:var(--text3);margin-top:2px;display:flex;align-items:center;gap:6px">
+            <span>👤 ${esc(hkObj.name)}${hkObj.rolle?' · '+esc(hkObj.rolle):''}</span>
+            ${telNr ? `<a href="tel:${esc(telNr)}" onclick="event.stopPropagation()" style="color:var(--accent-mid);font-size:11px;white-space:nowrap">📞 ${esc(telNr)}</a>` : ''}
+          </div>`;
+        })()}
         <div style="font-size:11px;color:var(--text3);margin-top:1px">${a.kanal||''} · ${a.datum||''}</div>
       </div>
       <button onclick="event.stopPropagation();abschliessen(${DB.aktivitaeten.indexOf(a)})" 
@@ -1130,6 +1146,7 @@ function openDetail(firma) {
         ${k.rolle?`<div class="kontakt-card-rolle">${esc(k.rolle)}</div>`:''}
         <div class="kontakt-card-detail">
           ${k.tel?`<a href="tel:${esc(k.tel)}" style="display:block;color:var(--accent-mid);font-size:12px">&#128222; ${esc(k.tel)}</a>`:''}
+          ${k.mobil?`<a href="tel:${esc(k.mobil)}" style="display:block;color:var(--accent-mid);font-size:12px">📱 ${esc(k.mobil)}</a>`:''}
           ${k.email?`<a href="mailto:${esc(k.email)}" style="display:block;color:var(--accent-mid);font-size:12px">&#9993; ${esc(k.email)}</a>`:''}
           ${k.notiz?`<div style="color:var(--text3);font-size:11px;margin-top:3px">${esc(k.notiz)}</div>`:''}
         </div>
@@ -1414,12 +1431,13 @@ function openKontaktModal(firma, idx) {
     document.getElementById('k-name').value = k.name||'';
     document.getElementById('k-rolle').value = k.rolle||'';
     document.getElementById('k-tel').value = k.tel||'';
+    document.getElementById('k-mobil').value = k.mobil||'';
     document.getElementById('k-email').value = k.email||'';
     document.getElementById('k-linkedin').value = k.linkedin||'';
     document.getElementById('k-notiz').value = k.notiz||'';
   } else {
     document.getElementById('kontakt-modal-title').textContent = 'Gesprächspartner hinzufügen';
-    ['k-name','k-rolle','k-tel','k-email','k-linkedin','k-notiz'].forEach(id=>document.getElementById(id).value='');
+    ['k-name','k-rolle','k-tel','k-mobil','k-email','k-linkedin','k-notiz'].forEach(id=>document.getElementById(id).value='');
   }
   openModal('kontakt-modal');
   setTimeout(()=>document.getElementById('k-name').focus(),100);
@@ -1433,7 +1451,7 @@ function saveKontakt() {
   const p = DB.prospects.find(x => x.firma === firma);
   if (!p) return;
   if (!p.weitereKontakte) p.weitereKontakte = [];
-  const kontakt = { name, rolle: document.getElementById('k-rolle').value.trim(), tel: document.getElementById('k-tel').value.trim(), email: document.getElementById('k-email').value.trim(), linkedin: document.getElementById('k-linkedin').value.trim(), notiz: document.getElementById('k-notiz').value.trim() };
+  const kontakt = { name, rolle: document.getElementById('k-rolle').value.trim(), tel: document.getElementById('k-tel').value.trim(), mobil: document.getElementById('k-mobil').value.trim(), email: document.getElementById('k-email').value.trim(), linkedin: document.getElementById('k-linkedin').value.trim(), notiz: document.getElementById('k-notiz').value.trim() };
   Object.keys(kontakt).forEach(k => { if (!kontakt[k]) delete kontakt[k]; });
   if (idx >= 0) { p.weitereKontakte[idx] = kontakt; } else { p.weitereKontakte.push(kontakt); }
   p._ts = Date.now();
