@@ -471,6 +471,7 @@ textarea { min-height: 70px; resize: vertical; }
             <option value="">Alle SDA</option>
             <option value="FK">FK-SDA</option>
             <option value="ERA">ERA-SDA</option>
+            <option value="ANN">ANN (Aruna Noah Nathan)</option>
             <option value="offen">Nicht zugewiesen</option>
           </select>
           <select class="filter-select" id="p-filter-prio" onchange="renderProspects()">
@@ -915,36 +916,43 @@ function ensureTimestamps() {
 
 async function syncPush() {
   try {
-    const pRows = DB.prospects.map(p => ({
-      id: p.id,
-      data: p,
-      updated_at: p._ts ? new Date(p._ts).toISOString() : new Date().toISOString()
-    }));
-    const r1 = await fetch(SB_URL + '/rest/v1/prospects', {
-      method: 'POST',
-      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-      body: JSON.stringify(pRows)
-    });
-    if (!r1.ok) console.error('Push prospects:', r1.status, await r1.text().then(t=>t.slice(0,100)));
-    if (DB.aktivitaeten.length > 0) {
-      DB.aktivitaeten.forEach((a, i) => { if (!a._id) a._id = (a.firma||'x').slice(0,10)+'_'+(a.datum||'')+'_'+i; });
-      const aRows = DB.aktivitaeten.map(a => ({ id: a._id, data: a }));
-      await fetch(SB_URL + '/rest/v1/aktivitaeten', {
+    const batchSize = 50;
+    for (let i = 0; i < DB.prospects.length; i += batchSize) {
+      const batch = DB.prospects.slice(i, i + batchSize);
+      const pRows = batch.map(p => ({
+        id: p.id, data: p,
+        updated_at: p._ts ? new Date(p._ts).toISOString() : new Date(0).toISOString()
+      }));
+      const r = await fetch(SB_URL + '/rest/v1/prospects', {
         method: 'POST',
         headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(aRows)
+        body: JSON.stringify(pRows)
       });
+      if (!r.ok) console.error('Push batch ' + i + ' error:', r.status);
+    }
+    if (DB.aktivitaeten.length > 0) {
+      DB.aktivitaeten.forEach((a, i) => { if (!a._id) a._id = (a.firma||'x').slice(0,10)+'_'+(a.datum||'')+'_'+i; });
+      const aRows = DB.aktivitaeten.map(a => ({
+        id: a._id, data: a,
+        updated_at: a._ts ? new Date(a._ts).toISOString() : new Date(0).toISOString()
+      }));
+      for (let i = 0; i < aRows.length; i += batchSize) {
+        await fetch(SB_URL + '/rest/v1/aktivitaeten', {
+          method: 'POST',
+          headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          body: JSON.stringify(aRows.slice(i, i + batchSize))
+        });
+      }
     }
     localStorage.setItem('fkc_last_sync', new Date().toISOString());
     updateSyncIndicator('ok');
   } catch(e) { console.error('syncPush error:', e); updateSyncIndicator('error'); }
 }
-
 async function syncPull() {
   try {
     const [pResp, aResp] = await Promise.all([
       fetch(SB_URL + '/rest/v1/prospects?select=id,data,updated_at&order=id.asc&limit=500', { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }),
-      fetch(SB_URL + '/rest/v1/aktivitaeten?select=id,data&order=updated_at.desc&limit=1000', { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } })
+      fetch(SB_URL + '/rest/v1/aktivitaeten?select=id,data,updated_at&order=updated_at.desc&limit=1000', { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } })
     ]);
     if (pResp.ok) {
       const pData = await pResp.json();
@@ -1001,7 +1009,16 @@ async function syncBoth() {
   if (syncInProgress) return;
   syncInProgress = true;
   updateSyncIndicator('syncing');
-  try { await syncPush(); await syncPull(); } finally { syncInProgress = false; }
+  try {
+    await syncPush();
+    await syncPull();
+    updateSyncIndicator('ok');
+  } catch(e) {
+    console.error('syncBoth error:', e);
+    updateSyncIndicator('error');
+  } finally {
+    syncInProgress = false;
+  }
 }
 
 // ── PROSPECTS RENDER ──
@@ -1017,6 +1034,7 @@ function renderProspects() {
     if (fw === 'wice' && p.quelle !== 'Wice') return false;
     if (fsda === 'FK' && p.sda !== 'FK') return false;
     if (fsda === 'ERA' && p.sda !== 'ERA') return false;
+    if (fsda === 'ANN' && p.sda !== 'ANN') return false;
     if (fsda === 'offen' && p.sda) return false;
     if (fw === 'eigen' && p.quelle === 'Wice') return false;
     if (fp && String(p.prio) !== fp) return false;
@@ -1081,6 +1099,7 @@ function renderProspects() {
             style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;font-weight:600;
             background:${p.sda==='FK'?'#C9A84C':'none'};color:${p.sda==='FK'?'white':'var(--text3)'};
             border:1px solid ${p.sda==='FK'?'#C9A84C':'var(--border)'}">FK</button>
+          <button onclick="event.stopPropagation();setSda('${esc(p.firma)}','ANN')" style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;font-weight:600;background:${p.sda==='ANN'?'#2d7a4e':'none'};color:${p.sda==='ANN'?'white':'var(--text3)'};border:1px solid ${p.sda==='ANN'?'#2d7a4e':'var(--border)'}">ANN</button>
         </div>
       </td>
       <td style="font-size:12px;color:var(--text3)">${p.followup?fmtDate(p.followup):''}</td>
@@ -1840,9 +1859,18 @@ function bereinigeDuplikate() {
 function resetUndNeuLaden() {
   if (!confirm('Lokale Daten zurücksetzen und neu aus Cloud laden?')) return;
   localStorage.removeItem(STORAGE_KEY);
-  DB = { prospects: JSON.parse(JSON.stringify(INIT_PROSPECTS)), aktivitaeten: [] };
+  // Reset DB to empty so cloud data wins completely
+  DB = { prospects: [], aktivitaeten: [] };
   toast('Lade Daten aus Cloud…');
-  syncPull().then(()=>toast('✓ Daten neu geladen'));
+  syncPull().then(() => {
+    // If cloud has no prospects yet, fall back to INIT_PROSPECTS
+    if (DB.prospects.length === 0) {
+      DB.prospects = JSON.parse(JSON.stringify(INIT_PROSPECTS));
+      saveData();
+    }
+    toast('✓ ' + DB.prospects.length + ' Prospects aus Cloud geladen');
+    renderAll();
+  });
 }
 
 document.querySelectorAll('[data-view]').forEach(el => {
@@ -2089,6 +2117,69 @@ function exportSdaProfiles() {
   document.body.appendChild(a); a.click();
   setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
   toast('✓ Profile heruntergeladen — im Browser öffnen und Cmd+P zum Drucken');
+}
+
+
+function exportAnnExcel() {
+  const ps = DB.prospects.filter(p => p.sda === 'ANN');
+  if (!ps.length) { toast('Keine ANN-Prospects zugewiesen'); return; }
+  const rows = [['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio €)','DISC','Kostentreiber','ERA-Argument','Ereignisse / Management-Wechsel']];
+  ps.forEach(p => rows.push([p.id,p.firma,p.ap||'',p.pos||'',p.tel||'',p.email||'',p.website||'',p.branche||'',p.adresse||'',p.ma||'',p.umsatz||'',p.disc||'',(p.kostentreiber||'').replace(/\(★+\)/g,'').replace(/,/g,' |'),p.argument||'',p.ereignisse||'']));
+  const bom = '﻿';
+  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('
+');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='ANN_SDA_Prospects_'+new Date().toISOString().slice(0,10)+'.csv';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('✓ ANN Excel exportiert ('+ps.length+' Prospects)');
+}
+
+function exportAnnProfiles() {
+  const ps = DB.prospects.filter(p => p.sda === 'ANN');
+  if (!ps.length) { toast('Keine ANN-Prospects zugewiesen'); return; }
+  const pages = ps.map((p, i) => {
+    const kt = (p.kostentreiber||'').split(/,(?![^(]*\))/).map(k => { const m=k.trim().match(/^(.+?)\s*\((★+)\)\s*$/); return m?`<tr><td style="padding:5px 10px;font-size:12px;font-weight:600;border-bottom:1px solid #eee">${m[1].trim()}</td><td style="padding:5px 10px;font-size:13px;color:#C9A84C;border-bottom:1px solid #eee">${m[2]}</td></tr>`:`<tr><td colspan="2" style="padding:5px 10px;font-size:12px;border-bottom:1px solid #eee">${k.trim()}</td></tr>`; }).join('');
+    const pageBreak = i < ps.length-1 ? 'page-break-after:always' : '';
+    return `<div style="${pageBreak};padding:20px 28px;font-family:Arial,sans-serif">
+      <div style="background:#0D1F3C;color:white;padding:12px 18px;border-radius:4px 4px 0 0;display:flex;justify-content:space-between">
+        <div><strong style="font-size:16px">${p.firma}</strong><div style="font-size:10px;color:rgba(255,255,255,.6);margin-top:2px">${p.id} · ${p.branche||''} · Prio ${'★'.repeat(p.prio||3)}</div></div>
+        <div style="text-align:right;font-size:10px;color:rgba(255,255,255,.5)">ANN-SDA Gesprächsvorbereitung<br>Aruna Noah Nathan | Stand: ${new Date().toLocaleDateString('de-DE')}</div>
+      </div>
+      <div style="height:3px;background:linear-gradient(to right,#2d7a4e,#52c47a,#2d7a4e);margin-bottom:14px"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:14px">
+        <div>
+          <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">ANSPRECHPARTNER</div>
+          <div style="font-size:15px;font-weight:700;color:#0D1F3C">${p.ap||'–'}</div>
+          <div style="font-size:12px;color:#666;margin-bottom:8px">${p.pos||''}</div>
+          ${p.tel?`<div style="font-size:12px;margin-bottom:3px">📞 <strong>${p.tel}</strong></div>`:''}
+          ${p.email?`<div style="font-size:12px;margin-bottom:3px">✉ ${p.email}</div>`:''}
+          ${p.disc?`<div style="margin-top:8px"><span style="background:#0D1F3C;color:#C9A84C;font-size:11px;font-weight:700;padding:2px 8px;border-radius:3px">DISC: ${p.disc}</span></div>`:''}
+        </div>
+        <div>
+          <div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">UNTERNEHMEN</div>
+          ${p.adresse?`<div style="font-size:12px;margin-bottom:3px">📍 ${p.adresse}</div>`:''}
+          ${p.ma?`<div style="font-size:12px;margin-bottom:3px">👥 ${p.ma} Mitarbeiter</div>`:''}
+          ${p.umsatz?`<div style="font-size:12px;margin-bottom:3px">💶 ca. ${p.umsatz} Mio. € Umsatz</div>`:''}
+          ${p.rechtsform?`<div style="font-size:11px;color:#888">${p.rechtsform}${p.gruendung?', gegr. '+p.gruendung:''}</div>`:''}
+        </div>
+      </div>
+      ${kt?`<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">KOSTENTREIBER & ERA-RELEVANZ</div><table style="width:100%;border-collapse:collapse;border:1px solid #eee"><thead><tr style="background:#0D1F3C;color:white"><th style="padding:5px 10px;text-align:left;font-size:11px">Kostenblock</th><th style="padding:5px 10px;text-align:left;font-size:11px;width:80px">Prio</th></tr></thead><tbody>${kt}</tbody></table></div>`:''}
+      ${p.argument?`<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">ERA-EINSTIEGSARGUMENT</div><div style="background:#EEF2FF;border-left:4px solid #0D1F3C;padding:10px 14px;font-size:12px;line-height:1.7;border-radius:0 4px 4px 0">${p.argument}</div></div>`:''}
+      ${p.ereignisse?`<div style="margin-bottom:12px"><div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">RELEVANTE EREIGNISSE / MANAGEMENT-WECHSEL</div><div style="background:#fffbf0;border-left:4px solid #C9A84C;padding:10px 14px;font-size:12px;line-height:1.7;border-radius:0 4px 4px 0">${p.ereignisse}</div></div>`:''}
+      <div style="margin-top:12px;padding-top:8px;border-top:1px solid #eee;font-size:10px;color:#aaa;display:flex;justify-content:space-between">
+        <span>Fabian Krone | ERA Group | Radeberger Str. 25, 01099 Dresden</span><span>${p.id} | ANN-SDA | Vertraulich</span>
+      </div>
+    </div>`;
+  }).join('<div style="height:1px;background:#ccc;margin:0 28px"></div>');
+  const printHtml = `<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>ANN-SDA Profile</title><style>@media print{@page{margin:0}body{margin:0}}</style></head><body>${pages}</body></html>`;
+  const blob = new Blob([printHtml], {type:'text/html;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href=url; a.download='ANN_SDA_Profile_'+new Date().toISOString().slice(0,10)+'.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('✓ ANN Profile heruntergeladen ('+ps.length+' Prospects) — im Browser öffnen, Cmd+P zum Drucken');
 }
 
 function startAutoSync() { ensureTimestamps(); syncBoth(); setInterval(syncBoth,60000); }
