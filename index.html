@@ -443,11 +443,17 @@ textarea { min-height: 70px; resize: vertical; }
 
     <!-- PROSPECTS -->
     <div class="view" id="view-prospects">
+      <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11px;color:var(--text3);font-weight:600;min-width:90px">FK-SDA Export:</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportSdaHtml()" style="font-size:11px">📄 HTML/PDF</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportSdaExcel()" style="font-size:11px">📊 Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportSdaProfiles()" style="font-size:11px">📋 Profile</button>
+      </div>
       <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
-        <span style="font-size:12px;color:var(--text3);font-weight:600">FK-SDA Export:</span>
-        <button class="btn btn-secondary btn-sm" onclick="exportSdaHtml()" style="font-size:12px">📄 HTML / PDF</button>
-        <button class="btn btn-secondary btn-sm" onclick="exportSdaExcel()" style="font-size:12px">📊 Excel</button>
-        <button class="btn btn-secondary btn-sm" onclick="exportSdaProfiles()" style="font-size:12px">📋 Profile (1 Seite / Prospect)</button>
+        <span style="font-size:11px;color:#2d7a4e;font-weight:600;min-width:90px">ANN Export:</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportAnnHtml()" style="font-size:11px;background:rgba(45,122,78,.08);color:#2d7a4e;border-color:#2d7a4e">📄 HTML/PDF</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportAnnExcel()" style="font-size:11px;background:rgba(45,122,78,.08);color:#2d7a4e;border-color:#2d7a4e">📊 Excel</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportAnnProfiles()" style="font-size:11px;background:rgba(45,122,78,.08);color:#2d7a4e;border-color:#2d7a4e">📋 Profile</button>
       </div>
       <div class="card">
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
@@ -2117,7 +2123,61 @@ function exportSdaProfiles() {
 }
 
 
-function exportAnnExcel() {
+function exportAnnHtml() {
+  var ps = DB.prospects.filter(function(p) { return p.sda === 'ANN'; });
+  if (!ps.length) { toast('Keine ANN-Prospects zugewiesen'); return; }
+  var rows = ps.map(function(p, i) {
+    var kt = (p.kostentreiber||'').split(',').map(function(k) {
+      var m = k.trim().match(/^(.+?)\s*\((★+)\)\s*$/);
+      return m ? '<li>'+m[1].trim()+' <span style="color:#C9A84C">'+m[2]+'</span></li>' : '<li>'+k.trim()+'</li>';
+    }).join('');
+    return '<div style="page-break-inside:avoid;margin-bottom:28px;border:1px solid #dde3ee;border-radius:6px;overflow:hidden">'
+      +'<div style="background:#0D1F3C;color:white;padding:10px 16px;display:flex;justify-content:space-between">'
+      +'<div><strong style="font-size:15px">'+p.firma+'</strong> <span style="color:#C9A84C;font-size:11px;margin-left:8px">'+p.id+'</span></div>'
+      +'<div style="font-size:11px;color:rgba(255,255,255,.6)">'+(p.branche||'')+'</div></div>'
+      +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:0">'
+      +'<div style="padding:12px 16px;border-right:1px solid #eee">'
+      +'<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">ANSPRECHPARTNER</div>'
+      +'<div style="font-weight:700;font-size:14px">'+(p.ap||'–')+'</div>'
+      +'<div style="font-size:12px;color:#666;margin-bottom:8px">'+(p.pos||'')+'</div>'
+      +(p.tel?'<div style="font-size:12px;margin-bottom:3px">📞 '+p.tel+'</div>':'')
+      +(p.email?'<div style="font-size:12px">✉ '+p.email+'</div>':'')
+      +(p.disc?'<div style="margin-top:8px"><span style="background:#0D1F3C;color:#C9A84C;font-size:11px;font-weight:700;padding:2px 8px;border-radius:3px">DISC: '+p.disc+'</span></div>':'')
+      +'</div>'
+      +'<div style="padding:12px 16px">'
+      +'<div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:6px">UNTERNEHMEN</div>'
+      +(p.adresse?'<div style="font-size:12px;margin-bottom:3px">📍 '+p.adresse+'</div>':'')
+      +(p.ma?'<div style="font-size:12px;margin-bottom:3px">👥 '+p.ma+' Mitarbeiter</div>':'')
+      +(p.umsatz?'<div style="font-size:12px;margin-bottom:3px">💶 ca. '+p.umsatz+' Mio. € Umsatz</div>':'')
+      +'</div></div>'
+      +(kt?'<div style="padding:10px 16px;border-top:1px solid #eee;background:#f9f9f9"><div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">KOSTENTREIBER</div><ul style="list-style:none;padding:0;margin:0;display:grid;grid-template-columns:1fr 1fr;gap:2px 16px;font-size:12px">'+kt+'</ul></div>':'')
+      +(p.argument?'<div style="padding:10px 16px;border-top:1px solid #eee;background:#EEF2FF"><div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">ERA-ARGUMENT</div><div style="font-size:12px;line-height:1.6;color:#333">'+p.argument+'</div></div>':'')
+      +(p.ereignisse?'<div style="padding:10px 16px;border-top:1px solid #eee"><div style="font-size:10px;font-weight:700;color:#888;letter-spacing:1px;margin-bottom:5px">EREIGNISSE / MANAGEMENT-WECHSEL</div><div style="font-size:12px;line-height:1.6;color:#555">'+p.ereignisse+'</div></div>':'')
+      +'</div>';
+  }).join('');
+  var html = '<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>ANN-SDA Liste</title>'
+    +'<style>body{font-family:Arial,sans-serif;font-size:13px;margin:28px;color:#222}'
+    +'.header{display:flex;justify-content:space-between;margin-bottom:24px;border-bottom:3px solid #0D1F3C;padding-bottom:12px}'
+    +'h1{font-size:18px;color:#0D1F3C;margin:0}.sub{font-size:11px;color:#888}'
+    +'@media print{body{margin:16px}@page{margin:1.5cm}}</style></head><body>'
+    +'<div class="header"><div><h1>ANN-SDA Prospect-Liste</h1>'
+    +'<div class="sub">Fabian Krone | ERA Group | Radeberger Str. 25, 01099 Dresden</div>'
+    +'<div class="sub">Für: Aruna Noah Nathan</div></div>'
+    +'<div class="sub">Stand: '+new Date().toLocaleDateString('de-DE')+' | '+ps.length+' Prospects | Vertraulich</div></div>'
+    +rows
+    +'<div style="margin-top:24px;font-size:10px;color:#aaa;text-align:center;border-top:1px solid #eee;padding-top:8px">ANN-SDA Prospect-Liste | Fabian Krone | ERA Group | '+new Date().toLocaleDateString('de-DE')+'</div>'
+    +'</body></html>';
+  var blob = new Blob([html], {type: 'text/html;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'ANN_SDA_Liste_' + new Date().toISOString().slice(0,10) + '.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('✓ ANN HTML-Liste heruntergeladen — im Browser öffnen, Cmd+P zum Drucken');
+}
+
+
   var ps = DB.prospects.filter(function(p) { return p.sda === 'ANN'; });
   if (!ps.length) { toast('Keine ANN-Prospects zugewiesen'); return; }
   var header = ['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio EUR)','DISC','Kostentreiber','ERA-Argument','Ereignisse'];
