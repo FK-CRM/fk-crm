@@ -2126,8 +2126,7 @@ function exportAnnExcel() {
   const rows = [['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio €)','DISC','Kostentreiber','ERA-Argument','Ereignisse / Management-Wechsel']];
   ps.forEach(p => rows.push([p.id,p.firma,p.ap||'',p.pos||'',p.tel||'',p.email||'',p.website||'',p.branche||'',p.adresse||'',p.ma||'',p.umsatz||'',p.disc||'',(p.kostentreiber||'').replace(/\(★+\)/g,'').replace(/,/g,' |'),p.argument||'',p.ereignisse||'']));
   const bom = '﻿';
-  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('
-');
+  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('\r\n');
   const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a'); a.href=url; a.download='ANN_SDA_Prospects_'+new Date().toISOString().slice(0,10)+'.csv';
