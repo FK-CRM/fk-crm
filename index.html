@@ -2178,6 +2178,7 @@ function exportAnnHtml() {
 }
 
 
+function exportAnnExcel() {
   var ps = DB.prospects.filter(function(p) { return p.sda === 'ANN'; });
   if (!ps.length) { toast('Keine ANN-Prospects zugewiesen'); return; }
   var header = ['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio EUR)','DISC','Kostentreiber','ERA-Argument','Ereignisse'];
