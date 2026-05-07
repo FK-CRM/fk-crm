@@ -1997,36 +1997,33 @@ function exportSdaHtml() {
 
 // ── SDA EXPORT: EXCEL ──
 function exportSdaExcel() {
-  const fkProspects = DB.prospects.filter(p => p.sda === 'FK');
+  var fkProspects = DB.prospects.filter(function(p) { return p.sda === 'FK'; });
   if (!fkProspects.length) { toast('Keine FK-SDA Prospects zugewiesen'); return; }
-
-  const rows = [
-    ['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio €)','DISC','Status','Priorität','Kostentreiber','ERA-Argument','Ereignisse / Presse']
-  ];
-  fkProspects.forEach(p => {
-    rows.push([
-      p.id, p.firma, p.ap||'', p.pos||'', p.tel||'', p.email||'', p.website||'',
+  var header = ['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio EUR)','DISC','Status','Prioritaet','Kostentreiber','ERA-Argument','Ereignisse'];
+  var lines = [header];
+  fkProspects.forEach(function(p) {
+    lines.push([p.id, p.firma, p.ap||'', p.pos||'', p.tel||'', p.email||'', p.website||'',
       p.branche||'', p.adresse||'', p.ma||'', p.umsatz||'', p.disc||'',
       p.status||'', p.prio||'',
       (p.kostentreiber||'').replace(/\(★+\)/g,'').replace(/,/g,' |'),
-      p.argument||'', p.ereignisse||''
-    ]);
+      p.argument||'', p.ereignisse||'']);
   });
-
-  // Build CSV (Excel-compatible with BOM)
-  const bom = '\uFEFF';
-  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('\r\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  var SEP = ';';
+  var NL = String.fromCharCode(13) + String.fromCharCode(10);
+  var BOM = String.fromCharCode(0xFEFF);
+  var csv = BOM + lines.map(function(r) {
+    return r.map(function(c) { return '"' + String(c||'').replace(/"/g, '""') + '"'; }).join(SEP);
+  }).join(NL);
+  var blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
   a.href = url;
   a.download = 'FK_SDA_Prospects_' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a); a.click();
-  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-  toast('✓ Excel-CSV exportiert (' + fkProspects.length + ' Prospects)');
+  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('Exportiert: ' + fkProspects.length + ' FK-Prospects');
 }
 
-// ── SDA EXPORT: PROFILE (1 Seite pro Prospect) ──
 function exportSdaProfiles() {
   const fkProspects = DB.prospects.filter(p => p.sda === 'FK');
   if (!fkProspects.length) { toast('Keine FK-SDA Prospects zugewiesen'); return; }
@@ -2121,18 +2118,30 @@ function exportSdaProfiles() {
 
 
 function exportAnnExcel() {
-  const ps = DB.prospects.filter(p => p.sda === 'ANN');
+  var ps = DB.prospects.filter(function(p) { return p.sda === 'ANN'; });
   if (!ps.length) { toast('Keine ANN-Prospects zugewiesen'); return; }
-  const rows = [['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio €)','DISC','Kostentreiber','ERA-Argument','Ereignisse / Management-Wechsel']];
-  ps.forEach(p => rows.push([p.id,p.firma,p.ap||'',p.pos||'',p.tel||'',p.email||'',p.website||'',p.branche||'',p.adresse||'',p.ma||'',p.umsatz||'',p.disc||'',(p.kostentreiber||'').replace(/\(★+\)/g,'').replace(/,/g,' |'),p.argument||'',p.ereignisse||'']));
-  const bom = '﻿';
-  const csv = bom + rows.map(r => r.map(c => '"'+(String(c||'').replace(/"/g,'""'))+'"').join(';')).join('\r\n');
-  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href=url; a.download='ANN_SDA_Prospects_'+new Date().toISOString().slice(0,10)+'.csv';
+  var header = ['ERA-ID','Firma','Ansprechpartner','Position','Telefon','E-Mail','Website','Branche','Adresse','Mitarbeiter','Umsatz (Mio EUR)','DISC','Kostentreiber','ERA-Argument','Ereignisse'];
+  var lines = [header];
+  ps.forEach(function(p) {
+    lines.push([p.id, p.firma, p.ap||'', p.pos||'', p.tel||'', p.email||'', p.website||'',
+      p.branche||'', p.adresse||'', p.ma||'', p.umsatz||'', p.disc||'',
+      (p.kostentreiber||'').replace(/\(★+\)/g,'').replace(/,/g,' |'),
+      p.argument||'', p.ereignisse||'']);
+  });
+  var SEP = ';';
+  var NL = String.fromCharCode(13) + String.fromCharCode(10);
+  var BOM = String.fromCharCode(0xFEFF);
+  var csv = BOM + lines.map(function(r) {
+    return r.map(function(c) { return '"' + String(c||'').replace(/"/g, '""') + '"'; }).join(SEP);
+  }).join(NL);
+  var blob = new Blob([csv], {type: 'text/csv;charset=utf-8'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = 'ANN_SDA_Prospects_' + new Date().toISOString().slice(0,10) + '.csv';
   document.body.appendChild(a); a.click();
-  setTimeout(()=>{ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
-  toast('✓ ANN Excel exportiert ('+ps.length+' Prospects)');
+  setTimeout(function() { document.body.removeChild(a); URL.revokeObjectURL(url); }, 1000);
+  toast('Exportiert: ' + ps.length + ' ANN-Prospects');
 }
 
 function exportAnnProfiles() {
