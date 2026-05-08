@@ -2273,9 +2273,8 @@ function startAutoSync() { ensureTimestamps(); syncBoth(); setInterval(syncBoth,
 
 renderAll();
 startAutoSync();
-</script>
-</body>
-</html>function exportSdaExcel() {
+
+function exportSdaExcel() {
   var ps = DB.prospects.filter(function(p) { return p.sda === 'FK'; });
   if (!ps.length) { toast('Keine FK-SDA Prospects zugewiesen'); return; }
 
@@ -2343,4 +2342,6 @@ startAutoSync();
   setTimeout(function(){document.body.removeChild(a);URL.revokeObjectURL(url);}, 1000);
   toast('✓ FK-SDA Excel heruntergeladen');
 }
-
+</script>
+</body>
+</html>
