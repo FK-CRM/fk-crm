@@ -2011,7 +2011,7 @@ function buildProspectCard(p, forPrint) {
   }
   if (p.ersttermin_donts) {
     var donts = p.ersttermin_donts.split('·').slice(0,2).map(function(d){return d.trim();}).filter(Boolean);
-    if (donts.length) coldCallTips.push('<strong>✗ Don'ts:</strong> ' + donts.join(' · '));
+    if (donts.length) coldCallTips.push('<strong>✗ Donts:</strong> ' + donts.join(' · '));
   }
 
   return '<div style="page-break-inside:avoid;margin-bottom:24px;border:1px solid #dde3ee;border-radius:6px;overflow:hidden;font-family:Arial,sans-serif">'
