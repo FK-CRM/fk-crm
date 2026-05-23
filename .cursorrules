@@ -1,0 +1,107 @@
+# FK Consulting — ERA Group CRM (PWA)
+
+## Projektüberblick
+
+Single-Page-CRM für **FK Consulting** (ERA Group) zur Verwaltung von Sales-Prospects und Aktivitäten. Kein Build-Tool, kein Framework — reines Vanilla HTML/CSS/JS, deploybar als statische Site (z. B. GitHub Pages unter `/fk-crm/`).
+
+**Sprache:** UI und Fachbegriffe durchgehend **Deutsch**.
+
+## Dateistruktur
+
+| Datei | Rolle |
+|-------|--------|
+| `index.html` | Gesamte App: Markup, CSS (`:root`-Variablen), alle Views, Modals, **gesamte App-Logik** (~2300 Zeilen `<script>`) |
+| `data.js` | Nur Seed-Daten: `INIT_PROSPECTS`, `INIT_AKTIVITAETEN` (große JSON-Arrays, ~156 Prospects). Wird per `<script src="data.js">` vor dem Inline-Script geladen |
+| `manifest.json` | PWA-Manifest (`start_url`: `/fk-crm/`) |
+| `sw.js` | Service Worker (Cache `fkc-crm-v13`, network-first; **Supabase-Requests werden nicht gecacht**) |
+| `icon-192.png`, `icon-512.png` | App-Icons |
+
+**Nicht vorhanden:** `package.json`, Bundler, TypeScript, Komponenten-Framework, Testsuite.
+
+## Architektur & Datenfluss
+
+```
+data.js (INIT_*)  →  index.html lädt localStorage (STORAGE_KEY)
+                   →  DB = { prospects, aktivitaeten }
+                   →  saveData() → localStorage + debounced syncPush (800ms)
+                   →  syncPull/syncBoth ↔ Supabase REST
+```
+
+- **Lokaler State:** globales `DB` mit `prospects` und `aktivitaeten`
+- **localStorage-Key:** `era_crm_fk_v9` (`STORAGE_KEY`)
+- **Cloud:** Supabase (`SB_URL`, `SB_KEY` in `index.html`) — Tabellen `prospects` und `aktivitaeten`, je Zeile `{ id, data, updated_at }`
+- **Konfliktauflösung:** Feld `_ts` (ms) auf Prospect/Aktivität; **lokale Version gewinnt**, wenn `_ts` neuer als Cloud-`updated_at`
+- **Auto-Sync:** `startAutoSync()` → `syncBoth()` beim Start + alle 60s
+- `loadData()` existiert, Initialisierung erfolgt aber auch direkt per Inline-Block vor dem Sync-Engine
+
+Bei **jeder Mutation** von Prospects/Aktivitäten: `p._ts = Date.now()` (bzw. `akt._ts`) setzen, dann `saveData()` und ggf. `renderAll()` oder gezieltes Re-Render.
+
+## Domänenmodell
+
+### Prospect (`DB.prospects[]`)
+
+Wichtige Felder: `id` (z. B. `ERA-001`), `firma` (natürlicher Schlüssel für Detail/Navigation), `ap`, `pos`, `status`, `prio` (1–5), `followup`, `kanal`, `argument`, `kostentreiber`, `disc`, `tel`, `email`, `umsatz`, `ma`, `notizen`, `weitereKontakte[]`, `quelle`, `adresse`, `branche`, `website`, `rechtsform`, `gruendung`, `ereignisse`, `ersttermin_dos`, `ersttermin_donts`, `hauptkontakt`, `sda`, `_ts`.
+
+- **Status-Pipeline:** Recherche → Kontaktiert → Ersttermin → Angebot → Verhandlung → Gewonnen | Kein Interesse
+- **SDA-Zuweisung:** `sda` = `FK` | `ERA` | `ANN` (Sales Development Associate; FK vs. ERA vs. Aruna Noah Nathan)
+- **Wice:** `quelle === 'Wice'` markiert geclaimte Prospects (`setWice`)
+- **Kontakte:** Haupt-AP + `weitereKontakte[]` mit `{ name, rolle, tel, mobil, email, linkedin?, notiz? }`; `hauptkontakt` steuert Sortierung/Anzeige
+
+### Aktivität (`DB.aktivitaeten[]`)
+
+Felder: `_id`, `datum`, `firma`, `eraId`, `ap`, `kanal`, `typ`, `ergebnis`, `schritt`, `followup`, `bearbeiter`, `status` (`offen` / `erledigt`; Legacy: `open`). `_id` wird bei Push auto-generiert falls fehlend.
+
+## UI-Struktur (`index.html`)
+
+**Views** (`.view`, per `switchView(name)`): `dashboard`, `prospects`, `aktivitaeten`, `view-detail` (Firma-Detail, `openDetail(firma)`).
+
+**Rendering:** Imperativ — `renderDashboard()`, `renderProspects()`, `renderAktivitaeten()`, `renderAll()`. Kein Virtual DOM.
+
+**Sicherheit bei HTML-Strings:** User-/Dateninhalte immer mit `esc()` escapen; in `onclick`-Attributen Firma etc. escaped übergeben.
+
+**Design:** CSS-Variablen in `:root` (Navy `#0D1F3C`, Gold `#C9A84C`, DM Sans / DM Serif Display). Mobile Breakpoint ~680px: Sidebar aus, Bottom-Nav, Safe-Area.
+
+**Modals:** `.modal-overlay.open` — u. a. `akt-modal`, `prospect-modal`, `folge-modal`, `kontakt-modal`, `factsheet-modal`, `import-modal`.
+
+## Externe Abhängigkeiten (CDN)
+
+- **SheetJS** `xlsx@0.18.5` — Excel-Import/Export
+- **Google Fonts** — DM Sans, DM Serif Display
+
+## Features (nicht umbauen ohne Absprache)
+
+- Dashboard: Metriken, offene Aktivitäten (Follow-up-Badges), Pipeline-Balken
+- Factsheet pro Prospect (`generateFactsheet`, Druck/PDF)
+- SDA-Exporte: `exportSdaHtml/Excel/Profiles`, `exportAnnHtml/Excel/Profiles` (gefiltert nach `sda`)
+- Excel-Import (`importExcel` / `handleExcelImport`), Backup-JSON (`exportBackup`)
+- Aktivitäten-Workflow: erfassen → abschließen → optional Folgeaktivität (`folge-modal`)
+- `bereinigeDuplikate()`, `resetUndNeuLaden()` (löscht localStorage, pullt Cloud)
+
+## Coding-Regeln für Änderungen
+
+1. **Minimale Diffs** — Kein Refactoring „nebenbei“, kein Framework einführen, keine Aufteilung in Module ohne explizite Anforderung.
+2. **Konventionen beibehalten** — Globale Funktionen, `// ── SEKTION ──`-Kommentare, `toast()` für Feedback, bestehende Button-/Modal-Patterns.
+3. **`data.js` nur für Seed-Daten** — App-Logik gehört in `index.html`. Neue Prospects initial in `INIT_PROSPECTS` nur wenn bewusst gewünscht.
+4. **Sync-Kompatibilität** — Neue Felder in Prospect/Aktivität-Objekten sind OK (JSON in Supabase `data`); `_ts` bei Writes nicht vergessen. `STORAGE_KEY` nur mit Bedacht versionieren (Migration).
+5. **Service Worker** — Bei Cache-Busting `CACHE` in `sw.js` erhöhen; Supabase-URLs nicht cachen.
+6. **Versionierung** — HTML-Kommentar `<!-- vYYYYMMDD_HHMMSS -->` in Zeile 1 bei größeren Releases aktualisieren.
+7. **Keine Secrets committen** — `SB_KEY` ist publishable; trotzdem keine zusätzlichen Credentials einfügen.
+8. **Deutsch** — Labels, Toasts, Confirm-Dialoge auf Deutsch lassen.
+
+## Typische Aufgaben
+
+| Aufgabe | Wo ändern |
+|---------|-----------|
+| Neues UI-Feld Prospect | Modal `#prospect-modal`, `saveProspect()`, Detail-Render in `openDetail`, ggf. Tabelle `renderProspects` |
+| Neuer Filter/Sortierung Prospects | Toolbar `#view-prospects`, Logik in `renderProspects` |
+| Sync/Cloud | `syncPush`, `syncPull`, `syncBoth` |
+| Styling | `<style>` in `index.html`, CSS-Variablen |
+| Initialdaten | `data.js` (`INIT_PROSPECTS` / `INIT_AKTIVITAETEN`) |
+
+## Was vermeiden
+
+- React/Vue/npm-Toolchain einführen
+- Prospect-Identifikation von `firma` auf UUID umstellen (bricht bestehende Navigation/Filter)
+- `renderAll()` bei jedem Tastendruck ohne Grund (Performance auf Mobile)
+- HTML ohne `esc()` aus Nutzerdaten bauen (XSS)
+- Englische UI-Texte ohne Anforderung
