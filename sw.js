@@ -1,4 +1,4 @@
-const CACHE = 'fkc-crm-v14';
+const CACHE = 'fkc-crm-v15';
 self.addEventListener('install', e => {
   self.skipWaiting();
   e.waitUntil(caches.open(CACHE).then(c => c.add('/')));

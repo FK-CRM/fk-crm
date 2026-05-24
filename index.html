@@ -1473,30 +1473,155 @@ function deleteKontakt(firma, idx) {
 }
 
 // ── EXCEL IMPORT ──
-function importExcel(e) {
-  const file = e.target.files[0];
+const IMPORT_LEGAL_FORMS = ['kgaa', 'gmbh', 'mbh', 'ag', 'se', 'kg', 'co'];
+
+function normalizeFirmaKey(name) {
+  let s = String(name || '').toLowerCase().replace(/\s+/g, '');
+  IMPORT_LEGAL_FORMS.forEach(f => { s = s.split(f).join(''); });
+  return s;
+}
+
+function getExcelCol(row, aliases) {
+  for (const a of aliases) {
+    if (row[a] != null && String(row[a]).trim() !== '') return String(row[a]).trim();
+  }
+  const keys = Object.keys(row);
+  for (const a of aliases) {
+    const al = a.toLowerCase();
+    for (const k of keys) {
+      if (k.toLowerCase() === al && row[k] != null && String(row[k]).trim() !== '') return String(row[k]).trim();
+    }
+  }
+  return '';
+}
+
+function mapImportRow(row) {
+  return {
+    firma: getExcelCol(row, ['Unternehmen', 'Firma', 'Company']),
+    ap: getExcelCol(row, ['Ansprechpartner', 'AP']),
+    pos: getExcelCol(row, ['Funktion', 'Position']),
+    tel: getExcelCol(row, ['Telefon', 'Tel']),
+    email: getExcelCol(row, ['E-Mail', 'Email', 'Mail']),
+    branche: getExcelCol(row, ['Branche']),
+    adresse: getExcelCol(row, ['Adresse']),
+    umsatz: getExcelCol(row, ['Umsatz']),
+    ma: getExcelCol(row, ['Mitarbeiter', 'MA']),
+    kostentreiber: getExcelCol(row, ['Kostentreiber']),
+    disc: getExcelCol(row, ['DISC']),
+    argument: getExcelCol(row, ['Argument']),
+    ersttermin_dos: getExcelCol(row, ['Dos']),
+    ersttermin_donts: getExcelCol(row, ['Donts']),
+    presse: getExcelCol(row, ['Presse'])
+  };
+}
+
+function importPreviewListItem(m) {
+  const sub = m.ap ? ' <span style="color:var(--text3)">· ' + esc(m.ap) + '</span>' : '';
+  return '<li style="padding:4px 0;font-size:13px">' + esc(m.firma) + sub + '</li>';
+}
+
+function renderImportPreview() {
+  const { toAdd, skipped } = importPreview;
+  const total = toAdd.length + skipped.length;
+  const body = document.getElementById('import-modal-body');
+  const foot = document.getElementById('import-modal-foot');
+  body.innerHTML =
+    '<p style="font-size:13px;color:var(--text2);margin-bottom:16px">' + total + ' Zeile(n) mit Firmennamen gelesen</p>' +
+    '<h4 style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--success)">Wird neu hinzugefügt (' + toAdd.length + ')</h4>' +
+    '<ul style="margin:0 0 16px 20px;max-height:180px;overflow-y:auto">' +
+    (toAdd.length ? toAdd.map(importPreviewListItem).join('') : '<li style="color:var(--text3);font-size:13px;list-style:none;margin-left:-20px">—</li>') +
+    '</ul>' +
+    '<h4 style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text3)">Übersprungen (Dublette) (' + skipped.length + ')</h4>' +
+    '<ul style="margin:0 0 0 20px;max-height:180px;overflow-y:auto">' +
+    (skipped.length ? skipped.map(importPreviewListItem).join('') : '<li style="color:var(--text3);font-size:13px;list-style:none;margin-left:-20px">—</li>') +
+    '</ul>';
+  foot.style.display = toAdd.length ? 'flex' : 'none';
+  openModal('import-modal');
+}
+
+function triggerImport() {
+  const inp = document.getElementById('excel-import-input');
+  inp.value = '';
+  inp.click();
+}
+
+function handleExcelImport(event) {
+  const file = event.target.files[0];
   if (!file) return;
   const reader = new FileReader();
   reader.onload = ev => {
     try {
-      const wb = XLSX.read(ev.target.result, {type:'binary'});
+      const wb = XLSX.read(ev.target.result, { type: 'binary' });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws);
-      let added = 0;
-      data.forEach(row => {
-        const firma = row['Unternehmen'] || row['Firma'] || row['Company'] || '';
-        if (!firma) return;
-        if (DB.prospects.find(p=>p.firma===firma)) return;
-        const maxId = Math.max(...DB.prospects.map(p=>parseInt((p.id||'ERA-0').replace('ERA-',''))||0));
-        DB.prospects.push({ id:'ERA-'+String(maxId+1).padStart(3,'0'), firma, ap:row['Ansprechpartner']||row['AP']||'', pos:row['Position']||'', status:'Recherche', prio:3, quelle:'Import', _ts:Date.now() });
-        added++;
+      const rows = XLSX.utils.sheet_to_json(ws);
+      const existingKeys = new Set(DB.prospects.map(p => normalizeFirmaKey(p.firma)));
+      const pendingKeys = new Set();
+      const toAdd = [];
+      const skipped = [];
+      rows.forEach(row => {
+        const mapped = mapImportRow(row);
+        if (!mapped.firma) return;
+        const key = normalizeFirmaKey(mapped.firma);
+        if (existingKeys.has(key) || pendingKeys.has(key)) {
+          skipped.push(mapped);
+          return;
+        }
+        pendingKeys.add(key);
+        toAdd.push(mapped);
       });
-      saveData();
-      renderProspects();
-      toast('✓ ' + added + ' Prospects importiert');
-    } catch(err) { toast('Fehler beim Import: ' + err.message); }
+      if (!toAdd.length && !skipped.length) {
+        toast('Keine gültigen Zeilen in der Excel-Datei');
+        return;
+      }
+      importPreview = { toAdd, skipped };
+      renderImportPreview();
+    } catch (err) {
+      toast('Fehler beim Lesen: ' + err.message);
+    }
   };
   reader.readAsBinaryString(file);
+}
+
+function confirmImport() {
+  if (!importPreview || !importPreview.toAdd.length) {
+    toast('Keine Datensätze zum Importieren');
+    return;
+  }
+  let maxId = Math.max(0, ...DB.prospects.map(p => parseInt((p.id || 'ERA-0').replace('ERA-', '')) || 0));
+  const n = importPreview.toAdd.length;
+  importPreview.toAdd.forEach(m => {
+    maxId++;
+    DB.prospects.push({
+      id: 'ERA-' + String(maxId).padStart(3, '0'),
+      firma: m.firma,
+      ap: m.ap || '',
+      pos: m.pos || '',
+      tel: m.tel || '',
+      email: m.email || '',
+      branche: m.branche || '',
+      adresse: m.adresse || '',
+      umsatz: m.umsatz || '',
+      ma: m.ma || '',
+      kostentreiber: m.kostentreiber || '',
+      disc: m.disc || '',
+      argument: m.argument || '',
+      ersttermin_dos: m.ersttermin_dos || '',
+      ersttermin_donts: m.ersttermin_donts || '',
+      presse: m.presse || '',
+      status: 'Recherche',
+      prio: 3,
+      quelle: 'Wice-Import',
+      weitereKontakte: [],
+      _ts: Date.now()
+    });
+  });
+  saveData();
+  renderProspects();
+  closeModal('import-modal');
+  document.getElementById('import-modal-foot').style.display = 'none';
+  importPreview = null;
+  document.getElementById('excel-import-input').value = '';
+  toast('✓ ' + n + ' Prospect' + (n === 1 ? '' : 's') + ' importiert');
 }
 
 function exportBackup() {
