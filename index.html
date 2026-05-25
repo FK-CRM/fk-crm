@@ -1134,6 +1134,7 @@ function renderProspects() {
 function openDetail(firma) {
   const p = DB.prospects.find(x => x.firma === firma);
   if (!p) return;
+  currentDetailFirma = firma;
   switchView('detail');
   const pAkts = DB.aktivitaeten.filter(a=>a.firma===p.firma||a.eraId===p.id).sort((a,b)=>(b.datum||'').localeCompare(a.datum||''));
   const sortedWK = [...(p.weitereKontakte||[]).filter(k=>k.name&&k.name!=='None')].sort((a,b)=>{if(a.name===p.hauptkontakt)return -1;if(b.name===p.hauptkontakt)return 1;return 0;});
@@ -1179,6 +1180,10 @@ function openDetail(firma) {
             <button class="btn btn-sm" style="background:rgba(220,0,0,.08);color:#cc2200;border:1px solid rgba(220,0,0,.2);font-size:12px" onclick="prospectLoeschen('${esc(p.firma)}')">🗑 Löschen</button>
           </div>
         </div>
+        ${p.callanlass ? `<div class="card" style="margin-bottom:12px;background:linear-gradient(135deg,#E8F4FD 0%,#D6EBFA 100%);border:2px solid #1a56b0;box-shadow:0 2px 8px rgba(26,86,176,.12)">
+          <div class="card-header" style="border-bottom-color:rgba(26,86,176,.2)"><div class="card-title" style="color:#0D1F3C;font-weight:700">📞 CALL-ANLASS</div></div>
+          <div style="padding:14px 16px;font-size:14px;color:#0D1F3C;line-height:1.65;font-weight:500">${esc(p.callanlass)}</div>
+        </div>` : ''}
         <div class="card" style="margin-bottom:12px">
           <div class="card-header"><div class="card-title">Aktivitäten-Historie</div><span style="font-size:12px;color:var(--text3)">${pAkts.length} gesamt · ${pAkts.filter(a=>(a.status||'offen')==='offen').length} offen</span></div>
           <div style="padding:0">
@@ -1495,8 +1500,20 @@ function getExcelCol(row, aliases) {
   return '';
 }
 
+function normalizeImportId(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  const m = s.match(/^ERA-(\d+)$/i);
+  if (m) return 'ERA-' + String(parseInt(m[1], 10)).padStart(3, '0');
+  const n = parseInt(s.replace(/\D/g, ''), 10);
+  if (!isNaN(n) && n > 0) return 'ERA-' + String(n).padStart(3, '0');
+  return s;
+}
+
 function mapImportRow(row) {
+  const ereignisse = getExcelCol(row, ['ereignisse', 'Ereignisse']) || getExcelCol(row, ['Presse']);
   return {
+    id: normalizeImportId(getExcelCol(row, ['ID', 'ERA-ID', 'Era-Id', 'id'])),
     firma: getExcelCol(row, ['Unternehmen', 'Firma', 'Company']),
     ap: getExcelCol(row, ['Ansprechpartner', 'AP']),
     pos: getExcelCol(row, ['Funktion', 'Position']),
@@ -1511,31 +1528,82 @@ function mapImportRow(row) {
     argument: getExcelCol(row, ['Argument']),
     ersttermin_dos: getExcelCol(row, ['Dos']),
     ersttermin_donts: getExcelCol(row, ['Donts']),
-    presse: getExcelCol(row, ['Presse'])
+    ereignisse,
+    rechtsform: getExcelCol(row, ['Rechtsform']),
+    gruendung: getExcelCol(row, ['Gründung', 'Gruendung', 'Grundung']),
+    website: getExcelCol(row, ['Website', 'Web']),
+    callanlass: getExcelCol(row, ['Call-Anlass', 'Callanlass', 'Call Anlass']),
+    prio: getExcelCol(row, ['Prio', 'Priorität', 'Prioritaet', 'Priority']),
+    status: getExcelCol(row, ['Status']),
+    quelle: getExcelCol(row, ['Quelle'])
+  };
+}
+
+function applyImportMerge(p, m) {
+  const overwrite = ['branche', 'rechtsform', 'gruendung', 'umsatz', 'ma', 'kostentreiber', 'disc', 'argument', 'ereignisse', 'callanlass', 'ersttermin_dos', 'ersttermin_donts'];
+  overwrite.forEach(f => { if (m[f]) p[f] = m[f]; });
+  if (m.adresse && !p.adresse) p.adresse = m.adresse;
+  if (m.website && !p.website) p.website = m.website;
+  p._ts = Date.now();
+}
+
+function buildImportProspect(m, id) {
+  const prioNum = parseInt(m.prio, 10);
+  return {
+    id,
+    firma: m.firma,
+    ap: m.ap || '',
+    pos: m.pos || '',
+    tel: m.tel || '',
+    email: m.email || '',
+    branche: m.branche || '',
+    adresse: m.adresse || '',
+    umsatz: m.umsatz || '',
+    ma: m.ma || '',
+    kostentreiber: m.kostentreiber || '',
+    disc: m.disc || '',
+    argument: m.argument || '',
+    ersttermin_dos: m.ersttermin_dos || '',
+    ersttermin_donts: m.ersttermin_donts || '',
+    ereignisse: m.ereignisse || '',
+    rechtsform: m.rechtsform || '',
+    gruendung: m.gruendung || '',
+    website: m.website || '',
+    callanlass: m.callanlass || '',
+    status: m.status || 'Recherche',
+    prio: (prioNum >= 1 && prioNum <= 5) ? prioNum : 3,
+    quelle: m.quelle || 'Wice-Import',
+    weitereKontakte: [],
+    _ts: Date.now()
   };
 }
 
 function importPreviewListItem(m) {
+  const label = m.mode === 'update'
+    ? '<span style="font-size:10px;font-weight:700;color:#0D1F3C;background:#E8F0FE;padding:1px 6px;border-radius:3px;margin-right:6px">UPDATE → ' + esc(m.targetId) + '</span>'
+    : '<span style="font-size:10px;font-weight:700;color:#1a5c32;background:#e8f8f0;padding:1px 6px;border-radius:3px;margin-right:6px">NEU</span>';
   const sub = m.ap ? ' <span style="color:var(--text3)">· ' + esc(m.ap) + '</span>' : '';
-  return '<li style="padding:4px 0;font-size:13px">' + esc(m.firma) + sub + '</li>';
+  return '<li style="padding:4px 0;font-size:13px">' + label + esc(m.firma || m.targetId) + sub + '</li>';
 }
 
 function renderImportPreview() {
-  const { toAdd, skipped } = importPreview;
-  const total = toAdd.length + skipped.length;
+  const { items, skipped } = importPreview;
+  const total = items.length + skipped.length;
+  const neu = items.filter(i => i.mode === 'new').length;
+  const upd = items.filter(i => i.mode === 'update').length;
   const body = document.getElementById('import-modal-body');
   const foot = document.getElementById('import-modal-foot');
   body.innerHTML =
-    '<p style="font-size:13px;color:var(--text2);margin-bottom:16px">' + total + ' Zeile(n) mit Firmennamen gelesen</p>' +
-    '<h4 style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--success)">Wird neu hinzugefügt (' + toAdd.length + ')</h4>' +
+    '<p style="font-size:13px;color:var(--text2);margin-bottom:16px">' + total + ' Zeile(n) verarbeitet · ' + neu + ' neu · ' + upd + ' Update</p>' +
+    '<h4 style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--success)">Wird importiert (' + items.length + ')</h4>' +
     '<ul style="margin:0 0 16px 20px;max-height:180px;overflow-y:auto">' +
-    (toAdd.length ? toAdd.map(importPreviewListItem).join('') : '<li style="color:var(--text3);font-size:13px;list-style:none;margin-left:-20px">—</li>') +
+    (items.length ? items.map(importPreviewListItem).join('') : '<li style="color:var(--text3);font-size:13px;list-style:none;margin-left:-20px">—</li>') +
     '</ul>' +
     '<h4 style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text3)">Übersprungen (Dublette) (' + skipped.length + ')</h4>' +
     '<ul style="margin:0 0 0 20px;max-height:180px;overflow-y:auto">' +
     (skipped.length ? skipped.map(importPreviewListItem).join('') : '<li style="color:var(--text3);font-size:13px;list-style:none;margin-left:-20px">—</li>') +
     '</ul>';
-  foot.style.display = toAdd.length ? 'flex' : 'none';
+  foot.style.display = items.length ? 'flex' : 'none';
   openModal('import-modal');
 }
 
@@ -1556,24 +1624,31 @@ function handleExcelImport(event) {
       const rows = XLSX.utils.sheet_to_json(ws);
       const existingKeys = new Set(DB.prospects.map(p => normalizeFirmaKey(p.firma)));
       const pendingKeys = new Set();
-      const toAdd = [];
+      const items = [];
       const skipped = [];
       rows.forEach(row => {
         const mapped = mapImportRow(row);
+        if (mapped.id) {
+          const existing = DB.prospects.find(p => p.id === mapped.id);
+          if (existing) {
+            items.push(Object.assign({}, mapped, { mode: 'update', targetId: mapped.id, firma: mapped.firma || existing.firma }));
+            return;
+          }
+        }
         if (!mapped.firma) return;
         const key = normalizeFirmaKey(mapped.firma);
         if (existingKeys.has(key) || pendingKeys.has(key)) {
-          skipped.push(mapped);
+          skipped.push(Object.assign({}, mapped, { mode: 'skip' }));
           return;
         }
         pendingKeys.add(key);
-        toAdd.push(mapped);
+        items.push(Object.assign({}, mapped, { mode: 'new' }));
       });
-      if (!toAdd.length && !skipped.length) {
+      if (!items.length && !skipped.length) {
         toast('Keine gültigen Zeilen in der Excel-Datei');
         return;
       }
-      importPreview = { toAdd, skipped };
+      importPreview = { items, skipped };
       renderImportPreview();
     } catch (err) {
       toast('Fehler beim Lesen: ' + err.message);
@@ -1583,45 +1658,41 @@ function handleExcelImport(event) {
 }
 
 function confirmImport() {
-  if (!importPreview || !importPreview.toAdd.length) {
+  if (!importPreview || !importPreview.items.length) {
     toast('Keine Datensätze zum Importieren');
     return;
   }
   let maxId = Math.max(0, ...DB.prospects.map(p => parseInt((p.id || 'ERA-0').replace('ERA-', '')) || 0));
-  const n = importPreview.toAdd.length;
-  importPreview.toAdd.forEach(m => {
-    maxId++;
-    DB.prospects.push({
-      id: 'ERA-' + String(maxId).padStart(3, '0'),
-      firma: m.firma,
-      ap: m.ap || '',
-      pos: m.pos || '',
-      tel: m.tel || '',
-      email: m.email || '',
-      branche: m.branche || '',
-      adresse: m.adresse || '',
-      umsatz: m.umsatz || '',
-      ma: m.ma || '',
-      kostentreiber: m.kostentreiber || '',
-      disc: m.disc || '',
-      argument: m.argument || '',
-      ersttermin_dos: m.ersttermin_dos || '',
-      ersttermin_donts: m.ersttermin_donts || '',
-      presse: m.presse || '',
-      status: 'Recherche',
-      prio: 3,
-      quelle: 'Wice-Import',
-      weitereKontakte: [],
-      _ts: Date.now()
-    });
+  let added = 0;
+  let updated = 0;
+  importPreview.items.forEach(m => {
+    if (m.mode === 'update') {
+      const p = DB.prospects.find(x => x.id === m.targetId);
+      if (p) { applyImportMerge(p, m); updated++; }
+      return;
+    }
+    let newId = m.id;
+    if (!newId) {
+      maxId++;
+      newId = 'ERA-' + String(maxId).padStart(3, '0');
+    }
+    DB.prospects.push(buildImportProspect(m, newId));
+    added++;
   });
   saveData();
   renderProspects();
+  if (document.getElementById('view-detail').classList.contains('active') && currentDetailFirma) {
+    const touched = importPreview.items.some(i => i.firma === currentDetailFirma || i.targetId === DB.prospects.find(x => x.firma === currentDetailFirma)?.id);
+    if (touched) openDetail(currentDetailFirma);
+  }
   closeModal('import-modal');
   document.getElementById('import-modal-foot').style.display = 'none';
   importPreview = null;
   document.getElementById('excel-import-input').value = '';
-  toast('✓ ' + n + ' Prospect' + (n === 1 ? '' : 's') + ' importiert');
+  const parts = [];
+  if (added) parts.push(added + ' neu');
+  if (updated) parts.push(updated + ' aktualisiert');
+  toast('✓ Import: ' + parts.join(', '));
 }
 
 function exportBackup() {
@@ -1773,6 +1844,11 @@ function generateFactsheet(firma) {
     <div class="sub">${p.branche||''} ${p.adresse?'&nbsp;│&nbsp;'+p.adresse:''} &nbsp;│&nbsp; ${p.id} &nbsp;│&nbsp; Priorität: ${'★'.repeat(p.prio||3)}</div>
   </div>
   <div class="gold-bar"></div>
+
+  ${p.callanlass ? `<div class="section" style="margin-bottom:20px">
+    <div class="section-title">CALL-ANLASS</div>
+    <div style="background:#E8F4FD;border-left:5px solid #1a56b0;padding:14px 18px;font-size:13px;line-height:1.75;color:#0D1F3C;font-weight:500;border-radius:0 4px 4px 0">${esc(p.callanlass)}</div>
+  </div>` : ''}
 
   <!-- KENNZAHLEN -->
   <div class="metrics">
