@@ -2400,13 +2400,15 @@ function exportAnnExcel() {
     // ERA argument row
     var arg = (p.argument||'');
     var disc = (p.disc||'').split('/')[0].trim();
-   rows += '<tr><td style="background:#FFF8E8;color:#333;font-family:Arial;font-size:10pt;'
-      +'line-height:1.4;padding:6px 8px;border-bottom:2px solid '+GOLD+';white-space:normal;vertical-align:top;width:1400px">'
-      +'<strong>📌 Special Info:</strong> '+arg+(disc?'  |  <strong>DISC:</strong> '+disc:'')+'</td><td colspan="18" style="background:#FFF8E8;border-bottom:2px solid '+GOLD+'"></td></tr>';
+    rows += '<tr><td style="background:#FFF8E8;border-bottom:2px solid '+GOLD+'"></td>'
+      +'<td style="width:1400px;background:#FFF8E8;color:#333;font-family:Arial;font-size:10pt;'
+      +'line-height:1.4;padding:6px 8px;border-bottom:2px solid '+GOLD+';white-space:normal;vertical-align:top">'
+      +'<strong>📌 Special Info:</strong> '+arg+(disc?'  |  <strong>DISC:</strong> '+disc:'')+'</td></tr>';
     if (p.callanlass) {
-     rows += '<tr><td style="background:#E8F4FD;color:#0D1F3C;font-family:Arial;font-size:10pt;'
+      rows += '<tr><td style="background:#E8F4FD;border-bottom:2px solid #1a56b0"></td>'
+        +'<td style="width:1400px;background:#E8F4FD;color:#0D1F3C;font-family:Arial;font-size:10pt;'
         +'line-height:1.4;padding:6px 8px;border-bottom:2px solid #1a56b0;border-left:4px solid #1a56b0;'
-        +'white-space:normal;vertical-align:top;width:1400px"><strong>📞 Call-Anlass:</strong> '+p.callanlass+'</td><td colspan="18" style="background:#E8F4FD;border-bottom:2px solid #1a56b0"></td></tr>';
+        +'white-space:normal;vertical-align:top"><strong>📞 Call-Anlass:</strong> '+p.callanlass+'</td></tr>';
     }
   });
 
