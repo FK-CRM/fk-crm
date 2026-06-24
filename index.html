@@ -768,7 +768,7 @@ textarea { min-height: 70px; resize: vertical; }
 const STORAGE_KEY = 'era_crm_fk_v9';
 const SB_URL = 'https://haqvaxclzpglcjwgwnuc.supabase.co';
 const SB_KEY = 'sb_publishable_ANE8JRKNN4sPa7mjyrjQHA_Yr84rfLM';
-const supabase = window.supabase.createClient(SB_URL, SB_KEY);
+const sbClient = supabase.createClient(SB_URL, SB_KEY);
 let authToken = null;
 let appInitialized = false;
 let syncInProgress = false;
@@ -1008,7 +1008,7 @@ function initApp() {
 }
 
 async function checkAuth() {
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await sbClient.auth.getSession();
   if (session) {
     authToken = session.access_token;
     showApp();
@@ -1026,7 +1026,7 @@ async function handleLogin(e) {
   const errEl = document.getElementById('login-error');
   btn.disabled = true;
   errEl.style.display = 'none';
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  const { data, error } = await sbClient.auth.signInWithPassword({ email, password });
   btn.disabled = false;
   if (error) {
     errEl.textContent = error.message;
@@ -1039,7 +1039,7 @@ async function handleLogin(e) {
 }
 
 async function handleLogout() {
-  await supabase.auth.signOut();
+  await sbClient.auth.signOut();
   location.reload();
 }
 
