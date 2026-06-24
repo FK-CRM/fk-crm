@@ -13,6 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display:ital@0;1&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 <script src="data.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 :root {
   --bg: #F7F5F0; --surface: #FFFFFF; --surface2: #F0EDE6;
@@ -349,9 +350,49 @@ textarea { min-height: 70px; resize: vertical; }
   .modal { width: 100vw; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
   .modal-overlay { align-items: flex-end; }
 }
+
+/* ── LOGIN ── */
+#login-screen {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  background: var(--accent); padding: 24px;
+}
+.login-card {
+  background: var(--surface); border-radius: var(--radius-lg); padding: 32px;
+  width: 100%; max-width: 380px; box-shadow: 0 8px 32px rgba(0,0,0,.2);
+}
+.login-logo {
+  font-family: Georgia, serif; font-size: 32px; font-weight: bold;
+  color: var(--accent); letter-spacing: 2px; line-height: 1;
+}
+.login-sub {
+  color: var(--gold); font-size: 9px; letter-spacing: 4px; margin: 4px 0 24px;
+}
+.login-title {
+  font-family: "DM Serif Display", serif; font-size: 20px; margin-bottom: 20px;
+}
+.login-error {
+  color: var(--danger); font-size: 12px; margin-top: 8px; padding: 8px 10px;
+  background: var(--danger-light); border-radius: var(--radius);
+}
 </style>
 </head>
 <body>
+
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">FK</div>
+    <div class="login-sub">CONSULTING · CRM</div>
+    <h2 class="login-title">Anmelden</h2>
+    <form id="login-form" onsubmit="handleLogin(event)">
+      <div class="form-group"><label>E-Mail</label><input type="email" id="login-email" required autocomplete="email"></div>
+      <div class="form-group"><label>Passwort</label><input type="password" id="login-password" required autocomplete="current-password"></div>
+      <div id="login-error" class="login-error" style="display:none"></div>
+      <button type="submit" class="btn btn-primary" style="width:100%;margin-top:8px" id="login-btn">Anmelden</button>
+    </form>
+  </div>
+</div>
+
+<div id="app-root" style="display:none">
 
 <!-- MOBILE HEADER -->
 <div class="mobile-header" id="mobile-header">
@@ -421,6 +462,7 @@ textarea { min-height: 70px; resize: vertical; }
   <div class="topbar">
     <div class="topbar-title" id="topbar-title">Dashboard</div>
     <div class="topbar-date" id="topbar-date"></div>
+    <button class="btn btn-secondary btn-sm" onclick="handleLogout()">Abmelden</button>
     <button class="btn btn-primary btn-sm" onclick="openModal('akt-modal')">+ Aktivität</button>
     <button class="btn btn-secondary btn-sm" onclick="openModal('prospect-modal')">+ Prospect</button>
   </div>
@@ -567,6 +609,8 @@ textarea { min-height: 70px; resize: vertical; }
     </button>
   </div>
 </div>
+
+</div><!-- /app-root -->
 
 <!-- TOAST -->
 <div class="toast" id="toast"></div>
@@ -724,6 +768,9 @@ textarea { min-height: 70px; resize: vertical; }
 const STORAGE_KEY = 'era_crm_fk_v9';
 const SB_URL = 'https://haqvaxclzpglcjwgwnuc.supabase.co';
 const SB_KEY = 'sb_publishable_ANE8JRKNN4sPa7mjyrjQHA_Yr84rfLM';
+const supabase = window.supabase.createClient(SB_URL, SB_KEY);
+let authToken = null;
+let appInitialized = false;
 let syncInProgress = false;
 // INIT_PROSPECTS loaded from data.js
 // INIT_AKTIVITAETEN loaded from data.js
@@ -924,9 +971,79 @@ function renderAll() {
 
 function updateSyncIndicator(state) { const el=document.getElementById('sync-indicator'); if(!el)return; if(state==='syncing'){el.textContent='↻ Synchronisiere…';el.style.color='rgba(255,255,255,.5)';}else if(state==='ok'){const now=new Date();el.textContent='✓ Sync '+now.getHours().toString().padStart(2,'0')+':'+now.getMinutes().toString().padStart(2,'0');el.style.color='rgba(255,255,255,.5)';}else{el.textContent='✗ Sync Fehler';el.style.color='#f87171';} }
 
-// DB already declared above - just initialize from localStorage
-const saved = localStorage.getItem(STORAGE_KEY);
-if (saved) { try { const _d=JSON.parse(saved); if(_d.prospects)DB.prospects=_d.prospects; if(_d.aktivitaeten)DB.aktivitaeten=_d.aktivitaeten; } catch(e) { DB.prospects=JSON.parse(JSON.stringify(INIT_PROSPECTS)); DB.aktivitaeten=JSON.parse(JSON.stringify(INIT_AKTIVITAETEN)); } } else { DB.prospects=JSON.parse(JSON.stringify(INIT_PROSPECTS)); DB.aktivitaeten=JSON.parse(JSON.stringify(INIT_AKTIVITAETEN)); }
+function sbHeaders(extra) {
+  const token = authToken || SB_KEY;
+  return Object.assign({ apikey: SB_KEY, Authorization: 'Bearer ' + token }, extra || {});
+}
+
+function showLogin() {
+  document.getElementById('login-screen').style.display = 'flex';
+  document.getElementById('app-root').style.display = 'none';
+}
+
+function showApp() {
+  document.getElementById('login-screen').style.display = 'none';
+  document.getElementById('app-root').style.display = 'block';
+}
+
+function initApp() {
+  if (appInitialized) return;
+  appInitialized = true;
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try {
+      const _d = JSON.parse(saved);
+      if (_d.prospects) DB.prospects = _d.prospects;
+      if (_d.aktivitaeten) DB.aktivitaeten = _d.aktivitaeten;
+    } catch(e) {
+      DB.prospects = JSON.parse(JSON.stringify(INIT_PROSPECTS));
+      DB.aktivitaeten = JSON.parse(JSON.stringify(INIT_AKTIVITAETEN));
+    }
+  } else {
+    DB.prospects = JSON.parse(JSON.stringify(INIT_PROSPECTS));
+    DB.aktivitaeten = JSON.parse(JSON.stringify(INIT_AKTIVITAETEN));
+  }
+  renderAll();
+  startAutoSync();
+}
+
+async function checkAuth() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (session) {
+    authToken = session.access_token;
+    showApp();
+    initApp();
+  } else {
+    showLogin();
+  }
+}
+
+async function handleLogin(e) {
+  e.preventDefault();
+  const email = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-password').value;
+  const btn = document.getElementById('login-btn');
+  const errEl = document.getElementById('login-error');
+  btn.disabled = true;
+  errEl.style.display = 'none';
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  btn.disabled = false;
+  if (error) {
+    errEl.textContent = error.message;
+    errEl.style.display = 'block';
+    return;
+  }
+  authToken = data.session.access_token;
+  showApp();
+  initApp();
+}
+
+async function handleLogout() {
+  await supabase.auth.signOut();
+  location.reload();
+}
+
+checkAuth();
 
 
 
@@ -947,7 +1064,7 @@ async function syncPush() {
       }));
       const r = await fetch(SB_URL + '/rest/v1/prospects', {
         method: 'POST',
-        headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        headers: sbHeaders({ 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
         body: JSON.stringify(pRows)
       });
       if (!r.ok) console.error('Push batch ' + i + ' error:', r.status);
@@ -961,7 +1078,7 @@ async function syncPush() {
       for (let i = 0; i < aRows.length; i += batchSize) {
         await fetch(SB_URL + '/rest/v1/aktivitaeten', {
           method: 'POST',
-          headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+          headers: sbHeaders({ 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
           body: JSON.stringify(aRows.slice(i, i + batchSize))
         });
       }
@@ -973,8 +1090,8 @@ async function syncPush() {
 async function syncPull() {
   try {
     const [pResp, aResp] = await Promise.all([
-      fetch(SB_URL + '/rest/v1/prospects?select=id,data,updated_at&order=id.asc&limit=500', { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }),
-      fetch(SB_URL + '/rest/v1/aktivitaeten?select=id,data,updated_at&order=updated_at.desc&limit=1000', { headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } })
+      fetch(SB_URL + '/rest/v1/prospects?select=id,data,updated_at&order=id.asc&limit=500', { headers: sbHeaders() }),
+      fetch(SB_URL + '/rest/v1/aktivitaeten?select=id,data,updated_at&order=updated_at.desc&limit=1000', { headers: sbHeaders() })
     ]);
     if (pResp.ok) {
       const pData = await pResp.json();
@@ -1392,7 +1509,7 @@ function prospectLoeschen(firma) {
   const id = DB.prospects[idx].id;
   DB.prospects.splice(idx, 1);
   saveData();
-  fetch(SB_URL + '/rest/v1/prospects?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY } }).catch(e=>console.error(e));
+  fetch(SB_URL + '/rest/v1/prospects?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: sbHeaders() }).catch(e=>console.error(e));
   toast('🗑 ' + firma + ' gelöscht');
   switchView('prospects');
   renderProspects();
@@ -2483,9 +2600,6 @@ function exportAnnProfiles() {
 }
 
 function startAutoSync() { ensureTimestamps(); syncBoth(); setInterval(syncBoth,60000); }
-
-renderAll();
-startAutoSync();
 
 function exportSdaExcel() {
   var ps = DB.prospects.filter(function(p) { return p.sda === 'FK'; });
