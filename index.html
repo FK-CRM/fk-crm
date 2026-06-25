@@ -1660,7 +1660,8 @@ function mapImportRow(row) {
     callanlass: getExcelCol(row, ['Call-Anlass', 'Callanlass', 'Call Anlass']),
     prio: getExcelCol(row, ['Prio', 'Priorität', 'Prioritaet', 'Priority']),
     status: getExcelCol(row, ['Status']),
-    quelle: getExcelCol(row, ['Quelle'])
+    quelle: getExcelCol(row, ['Quelle']),
+    sda: getExcelCol(row, ['SDA', 'Sda', 'sda'])
   };
 }
 
@@ -1669,6 +1670,7 @@ function applyImportMerge(p, m) {
   overwrite.forEach(f => { if (m[f]) p[f] = m[f]; });
   if (m.adresse && !p.adresse) p.adresse = m.adresse;
   if (m.website && !p.website) p.website = m.website;
+  if (m.sda) p.sda = m.sda;
   p._ts = Date.now();
 }
 
@@ -1698,6 +1700,7 @@ function buildImportProspect(m, id) {
     status: m.status || 'Recherche',
     prio: (prioNum >= 1 && prioNum <= 5) ? prioNum : 3,
     quelle: m.quelle || 'Wice-Import',
+    sda: m.sda || '',
     weitereKontakte: [],
     _ts: Date.now()
   };
