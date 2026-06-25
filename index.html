@@ -496,6 +496,11 @@ textarea { min-height: 70px; resize: vertical; }
         <button class="btn btn-secondary btn-sm" onclick="exportAnnHtml()" style="font-size:11px;background:rgba(45,122,78,.08);color:#2d7a4e;border-color:#2d7a4e">📄 HTML/PDF</button>
         <button class="btn btn-secondary btn-sm" onclick="exportAnnExcel()" style="font-size:11px;background:rgba(45,122,78,.08);color:#2d7a4e;border-color:#2d7a4e">📊 Excel</button>
         <button class="btn btn-secondary btn-sm" onclick="exportAnnProfiles()" style="font-size:11px;background:rgba(45,122,78,.08);color:#2d7a4e;border-color:#2d7a4e">📋 Profile</button>
+        <button class="btn btn-secondary btn-sm" onclick="exportAllCsv()" style="font-size:11px">🗂️ Alle (voller Datensatz)</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center">
+        <span style="font-size:11px;color:#b0521a;font-weight:600;min-width:90px">TM Export:</span>
+        <button class="btn btn-secondary btn-sm" onclick="exportTmCsv()" style="font-size:11px;background:rgba(176,82,26,.08);color:#b0521a;border-color:#b0521a">📥 CSV für Google Sheet</button>
       </div>
       <div class="card">
         <div style="padding:10px 16px;border-bottom:1px solid var(--border)">
@@ -520,6 +525,7 @@ textarea { min-height: 70px; resize: vertical; }
             <option value="FK">FK-SDA</option>
             <option value="ERA">ERA-SDA</option>
             <option value="ANN">ANN (Aruna Noah Nathan)</option>
+            <option value="TM">TM (Thomas Müller)</option>
             <option value="offen">Nicht zugewiesen</option>
           </select>
           <select class="filter-select" id="p-filter-prio" onchange="renderProspects()">
@@ -1174,6 +1180,7 @@ function renderProspects() {
     if (fsda === 'FK' && p.sda !== 'FK') return false;
     if (fsda === 'ERA' && p.sda !== 'ERA') return false;
     if (fsda === 'ANN' && p.sda !== 'ANN') return false;
+    if (fsda === 'TM' && p.sda !== 'TM') return false;
     if (fsda === 'offen' && p.sda) return false;
     if (fw === 'eigen' && p.quelle === 'Wice') return false;
     if (fp && String(p.prio) !== fp) return false;
@@ -1239,6 +1246,7 @@ function renderProspects() {
             background:${p.sda==='FK'?'#C9A84C':'none'};color:${p.sda==='FK'?'white':'var(--text3)'};
             border:1px solid ${p.sda==='FK'?'#C9A84C':'var(--border)'}">FK</button>
           <button onclick="event.stopPropagation();setSda('${esc(p.firma)}','ANN')" style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;font-weight:600;background:${p.sda==='ANN'?'#2d7a4e':'none'};color:${p.sda==='ANN'?'white':'var(--text3)'};border:1px solid ${p.sda==='ANN'?'#2d7a4e':'var(--border)'}">ANN</button>
+          <button onclick="event.stopPropagation();setSda('${esc(p.firma)}','TM')" style="font-size:10px;padding:2px 6px;border-radius:3px;cursor:pointer;font-weight:600;background:${p.sda==='TM'?'#b0521a':'none'};color:${p.sda==='TM'?'white':'var(--text3)'};border:1px solid ${p.sda==='TM'?'#b0521a':'var(--border)'}">TM</button>
         </div>
       </td>
       <td style="font-size:12px;color:var(--text3)">${p.followup?fmtDate(p.followup):''}</td>
@@ -2422,6 +2430,100 @@ function exportSdaProfiles() {
     + pages + '</body></html>';
   downloadHtml(html, 'FK_SDA_Profile_'+new Date().toISOString().slice(0,10)+'.html');
   toast('✓ FK Profile heruntergeladen ('+ps.length+') — Cmd+P zum Drucken');
+}
+
+function exportTmCsv() {
+  var ps = DB.prospects.filter(function(p){ return p.sda === 'TM'; });
+  if (!ps.length) { toast('Keine TM-Prospects zugewiesen'); return; }
+  var CRLF = String.fromCharCode(13) + String.fromCharCode(10);
+  function q(v){ v = (v==null?'':String(v)); return '"' + v.split('"').join('""') + '"'; }
+  function splitAdr(adr){
+    adr = (adr||'').trim();
+    var street='', city='';
+    if (!adr) return {street:'',city:''};
+    var parts = adr.split(',').map(function(s){return s.trim();}).filter(Boolean);
+    var m = adr.match(/(\d{5})\s+([^,]+)$/);
+    if (m){ city = m[2].trim(); }
+    if (parts.length === 1 && !m){ return {street:'',city:parts[0]}; }
+    var nums = parts.filter(function(s){return /^\d{4,5}$/.test(s);});
+    if (parts.length >= 3 && nums.length){
+      city = parts[parts.length-1];
+      var zip = nums[nums.length-1];
+      var streetParts = [];
+      for (var i=0;i<parts.length;i++){
+        if (parts[i]===city || parts[i]===zip) continue;
+        streetParts.push(parts[i]);
+      }
+      street = streetParts.join(' ').trim();
+    } else if (m) {
+      street = adr.replace(/,?\s*\d{5}\s+[^,]+$/,'').replace(/,\s*$/,'').trim();
+    } else {
+      street = parts[0]||'';
+    }
+    return {street:street, city:city};
+  }
+  function firstVal(v){ return (v||'').split('/')[0].trim(); }
+  function splitName(ap){
+    ap = (ap||'').trim();
+    if (!ap) return {first:'',last:''};
+    var t = ap.split(' ');
+    if (t.length === 1) return {first:'', last:t[0]};
+    return {first:t.slice(0,t.length-1).join(' '), last:t[t.length-1]};
+  }
+  var headers = ['Company Name','Street & Number','City','Salutation (Herr/Frau)','First Name','Last Name','Title','Office Phone','Direct Phone','Mobile Phone','Direct E-Mail','Company E-Mail','Company URL','DUNS-Nr.'];
+  var rows = [];
+  rows.push(headers.map(q).join(','));
+  ps.forEach(function(p){
+    var a = splitAdr(p.adresse);
+    var n = splitName(p.ap);
+    var row = [
+      p.firma || '',
+      a.street,
+      a.city,
+      '',
+      n.first,
+      n.last,
+      p.pos || '',
+      p.tel ? firstVal(p.tel) : '',
+      '',
+      '',
+      p.email || '',
+      '',
+      p.website || '',
+      ''
+    ];
+    rows.push(row.map(q).join(','));
+  });
+  var csv = rows.join(CRLF) + CRLF;
+  var blob = new Blob([String.fromCharCode(0xFEFF) + csv], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a2 = document.createElement('a');
+  a2.href = url;
+  a2.download = 'TM_Leads_' + new Date().toISOString().slice(0,10) + '.csv';
+  a2.click();
+  URL.revokeObjectURL(url);
+  toast('✓ TM CSV heruntergeladen (' + ps.length + ') — in Google Sheet importieren');
+}
+function exportAllCsv() {
+  var ps = DB.prospects;
+  if (!ps.length) { toast('Keine Prospects vorhanden'); return; }
+  var CRLF = String.fromCharCode(13) + String.fromCharCode(10);
+  function q(v){ v = (v==null?'':String(v)); return '"' + v.split('"').join('""') + '"'; }
+  var cols = ['id','firma','ap','pos','tel','email','branche','rechtsform','gruendung','adresse','website','umsatz','ma','kostentreiber','disc','argument','ereignisse','callanlass','ersttermin_dos','ersttermin_donts','prio','status','quelle','sda','notizen','followup','hrb','kanal'];
+  var rows = [];
+  rows.push(cols.map(q).join(','));
+  ps.forEach(function(p){
+    rows.push(cols.map(function(c){ return q(p[c]); }).join(','));
+  });
+  var csv = rows.join(CRLF) + CRLF;
+  var blob = new Blob([String.fromCharCode(0xFEFF) + csv], {type:'text/csv;charset=utf-8;'});
+  var url = URL.createObjectURL(blob);
+  var a2 = document.createElement('a');
+  a2.href = url;
+  a2.download = 'FK-CRM_Alle_Prospects_' + new Date().toISOString().slice(0,10) + '.csv';
+  a2.click();
+  URL.revokeObjectURL(url);
+  toast('✓ Voll-Export heruntergeladen (' + ps.length + ' Prospects, alle Felder)');
 }
 
 function exportAnnHtml() {
